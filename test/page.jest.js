@@ -92,6 +92,24 @@ describe('Page.close', function() {
   });
 });
 
+describe('Page.content', function () {
+  it('should work with directly set content', async({page, server}) => {
+    await page.setContent(`<p>hello<p>`);
+    expect(await page.content()).toBe(`<html><head></head><body><p>hello</p><p></p></body></html>`);
+    await page.setContent(`<p>world<p>`);
+    expect(await page.content()).toBe(`<html><head></head><body><p>world</p><p></p></body></html>`);
+  });
+  it('should work with remote content', async({page, server}) => {
+    await page.goto(server.EMPTY_PAGE);
+    expect(await page.content()).toBe(`<html><head></head><body></body></html>`);
+  });
+  it('should get content after navigation', async({page, server}) => {
+    await page.setContent(`<a href="${server.EMPTY_PAGE}">link</a>`);
+    await page.click('a');
+    expect(await page.content()).toBe(`<html><head></head><body></body></html>`);
+  });
+});
+
 describe('Page.Events.Load', function() {
   it('should fire when expected', async({page, server}) => {
     await Promise.all([
