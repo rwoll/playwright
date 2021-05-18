@@ -116,6 +116,37 @@ class Helper {
       return '';
     return '\n' + '='.repeat(20) + ' Browser output: ' + '='.repeat(20) + '\n' + logs.join('\n');
   }
+
+  /**
+   * For use with WebKit Remote Addresses which look like:
+   * ::1.8911
+   * 2606:2800:220:1:248:1893:25c8:1946.443
+   * 127.0.0.1:8000
+   *
+   * NB: They look IPv4 and IPv6's with ports but use an alternative notation.
+   */
+  static parseRemoteAddress(value?: string) {
+    if (!value)
+      return;
+
+    const colon = value.lastIndexOf(':');
+    const dot = value.lastIndexOf('.');
+    try {
+      if (colon > dot) { // IPv4
+        const [address, port] = value.split(':');
+        return {
+          ipAddress: address,
+          port: +port,
+        };
+      } else { // IPv6
+        const [address, port] = value.split('.');
+        return {
+          ipAddress: `[${address}]`,
+          port: +port,
+        };
+      }
+    } catch (_) {}
+  }
 }
 
 export const helper = Helper;

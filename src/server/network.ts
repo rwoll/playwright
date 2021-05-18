@@ -263,6 +263,24 @@ export type ResourceTiming = {
   responseStart: number;
 };
 
+export type IPAddressAndPort = {
+  ipAddress?: string;
+  port?: number;
+}
+
+export type SecurityDetails = {
+    protocol?: string;
+    subjectName?: string;
+    issuer?: string;
+    validFrom?: number;
+    validTo?: number;
+};
+
+export type ConnectionDetails = {
+  serverIPAddressAndPort?: IPAddressAndPort;
+  securityDetails?: SecurityDetails;
+}
+
 export class Response extends SdkObject {
   private _request: Request;
   private _contentPromise: Promise<Buffer> | null = null;
@@ -275,8 +293,11 @@ export class Response extends SdkObject {
   private _headersMap = new Map<string, string>();
   private _getResponseBodyCallback: GetResponseBodyCallback;
   private _timing: ResourceTiming;
+  private _connectionDetails: ConnectionDetails;
+  private _connectionDetailsFinishedCallback: (details: ConnectionDetails) => void = _ => {};
+  private _connectionDetailsPromise: Promise<ConnectionDetails>;
 
-  constructor(request: Request, status: number, statusText: string, headers: types.HeadersArray, timing: ResourceTiming, getResponseBodyCallback: GetResponseBodyCallback) {
+  constructor(request: Request, status: number, statusText: string, headers: types.HeadersArray, timing: ResourceTiming, getResponseBodyCallback: GetResponseBodyCallback, connectionDetails: ConnectionDetails & {complete?: boolean}) {
     super(request.frame(), 'response');
     this._request = request;
     this._timing = timing;
@@ -284,6 +305,16 @@ export class Response extends SdkObject {
     this._statusText = statusText;
     this._url = request.url();
     this._headers = headers;
+
+    const complete = connectionDetails.complete;
+    delete connectionDetails.complete;
+    this._connectionDetails = connectionDetails;
+    this._connectionDetailsPromise = new Promise(f => {
+      this._connectionDetailsFinishedCallback = f;
+    });
+    if (complete ?? true)
+      this._connectionDetailsFinished();
+
     for (const { name, value } of this._headers)
       this._headersMap.set(name.toLowerCase(), value);
     this._getResponseBodyCallback = getResponseBodyCallback;
@@ -293,9 +324,28 @@ export class Response extends SdkObject {
     this._request._setResponse(this);
   }
 
-  _requestFinished(responseEndTiming: number, error?: string) {
+  _requestFinished(responseEndTiming: number, error?: string, connectionDetails?: ConnectionDetails) {
+    this._connectionDetailsFinished(connectionDetails);
     this._request._responseEndTiming = Math.max(responseEndTiming, this._timing.responseStart);
     this._finishedPromiseCallback({ error });
+  }
+
+  _connectionDetailsFinished(connectionDetails?: ConnectionDetails) {
+    if (connectionDetails) {
+      const updated: ConnectionDetails = {};
+      const serverIPAddressAndPort = mergeUpdates(this._connectionDetails.serverIPAddressAndPort, connectionDetails?.serverIPAddressAndPort);
+      if (serverIPAddressAndPort)
+        updated.serverIPAddressAndPort = serverIPAddressAndPort;
+
+      const securityDetails = mergeUpdates(this._connectionDetails.securityDetails, connectionDetails?.securityDetails);
+      if (securityDetails)
+        updated.securityDetails = securityDetails;
+
+      if (Object.keys(updated).length > 0)
+        this._connectionDetails = updated;
+    }
+
+    this._connectionDetailsFinishedCallback(this._connectionDetails);
   }
 
   url(): string {
@@ -324,6 +374,16 @@ export class Response extends SdkObject {
 
   timing(): ResourceTiming {
     return this._timing;
+  }
+
+  async serverIPAddressAndPort(): Promise<IPAddressAndPort|null> {
+    const { serverIPAddressAndPort } = await this._connectionDetailsPromise;
+    return serverIPAddressAndPort || null;
+  }
+
+  async securityDetails(): Promise<SecurityDetails|null> {
+    const { securityDetails } = await this._connectionDetailsPromise;
+    return securityDetails || null;
   }
 
   body(): Promise<Buffer> {
@@ -475,4 +535,11 @@ export function mergeHeaders(headers: (types.HeadersArray | undefined | null)[])
   for (const [lower, value] of lowerCaseToValue)
     result.push({ name: lowerCaseToOriginalCase.get(lower)!, value });
   return result;
+}
+
+function mergeUpdates(prev?: { [k: string]: string|number }, updates?: { [k: string]: string|number }) {
+  if (prev && updates)
+    return {...prev, ...updates};
+
+  return updates || prev;
 }

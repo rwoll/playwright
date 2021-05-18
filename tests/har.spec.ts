@@ -281,3 +281,29 @@ it('should have popup requests', async ({ contextFactory, server }, testInfo) =>
   expect(entries[1].request.url).toBe(server.PREFIX + '/one-style.css');
   expect(entries[1].response.status).toBe(200);
 });
+
+it('should have connection details', async ({ contextFactory, server, browserName, browserMajorVersion }, testInfo) => {
+  const { page, getLog } = await pageWithHar(contextFactory, testInfo);
+  await page.goto(server.EMPTY_PAGE);
+  const log = await getLog();
+  const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
+  expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+  expect(port).toBe(server.PORT);
+  if (browserName === 'webkit')
+    expect(securityDetails).toEqual({protocol: 'SSL 2.0'});
+  else
+    expect(securityDetails).toBeUndefined();
+});
+
+it('should have security details', async ({ contextFactory, httpsServer, browserName, browserMajorVersion }, testInfo) => {
+  const { page, getLog } = await pageWithHar(contextFactory, testInfo);
+  await page.goto(httpsServer.EMPTY_PAGE);
+  const log = await getLog();
+  const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
+  const expectedDetails = {issuer: 'puppeteer-tests', protocol: 'TLS 1.3', subjectName: 'puppeteer-tests', validFrom: 1550084863, validTo: 33086084863};
+  if (browserName === 'webkit')
+    delete expectedDetails.issuer;
+  expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+  expect(port).toBe(httpsServer.PORT);
+  expect(securityDetails).toEqual(expectedDetails);
+});

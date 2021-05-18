@@ -37,6 +37,7 @@ export type PlaywrightWorkerFixtures = {
   browserOptions: LaunchOptions;
   browser: Browser;
   browserVersion: string;
+  browserMajorVersion: number;
 };
 type PlaywrightTestOptions = {
   hasTouch: BrowserContextOptions['hasTouch'];
@@ -83,6 +84,10 @@ export const playwrightFixtures: folio.Fixtures<PlaywrightTestOptions & Playwrig
 
   browserVersion: [async ({ browser }, run) => {
     await run(browser.version());
+  }, { scope: 'worker' } ],
+
+  browserMajorVersion: [async ({  browserVersion }, run) => {
+    await run(Number(browserVersion.split('.')[0]));
   }, { scope: 'worker' } ],
 
   createUserDataDir: async ({}, run) => {

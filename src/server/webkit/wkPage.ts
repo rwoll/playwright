@@ -999,7 +999,8 @@ export class WKPage implements PageDelegate {
     // event from protocol. @see https://crbug.com/883475
     const response = request.request._existingResponse();
     if (response)
-      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp));
+      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp), undefined, {serverIPAddressAndPort: serverIPAddressAndPort(event), securityDetails: securityDetails(event)});
+
     this._requestIdToRequest.delete(request._requestId);
     this._page._frameManager.requestFinished(request.request);
   }
@@ -1040,5 +1041,18 @@ function webkitWorldName(world: types.World) {
   switch (world) {
     case 'main': return undefined;
     case 'utility': return UTILITY_WORLD_NAME;
+  }
+}
+
+function serverIPAddressAndPort(event: Protocol.Network.loadingFinishedPayload): network.IPAddressAndPort | undefined {
+  if (event.metrics)
+    return helper.parseRemoteAddress(event.metrics.remoteAddress);
+}
+
+function securityDetails(event: Protocol.Network.loadingFinishedPayload): network.SecurityDetails | undefined {
+  if (event.metrics) {
+    return {
+      protocol: event.metrics.securityConnection?.protocol,
+    };
   }
 }
