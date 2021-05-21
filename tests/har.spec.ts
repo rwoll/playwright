@@ -282,7 +282,7 @@ it('should have popup requests', async ({ contextFactory, server }, testInfo) =>
   expect(entries[1].response.status).toBe(200);
 });
 
-it('should have connection details', async ({ contextFactory, server, browserName, browserMajorVersion }, testInfo) => {
+it('should have connection details', async ({ contextFactory, server, browserName }, testInfo) => {
   const { page, getLog } = await pageWithHar(contextFactory, testInfo);
   await page.goto(server.EMPTY_PAGE);
   const log = await getLog();
@@ -295,7 +295,7 @@ it('should have connection details', async ({ contextFactory, server, browserNam
     expect(securityDetails).toBeUndefined();
 });
 
-it('should have security details', async ({ contextFactory, httpsServer, browserName, browserMajorVersion }, testInfo) => {
+it('should have security details', async ({ contextFactory, httpsServer, browserName }, testInfo) => {
   const { page, getLog } = await pageWithHar(contextFactory, testInfo);
   await page.goto(httpsServer.EMPTY_PAGE);
   const log = await getLog();

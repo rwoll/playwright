@@ -119,8 +119,14 @@ class Helper {
 
   /**
    * For use with WebKit Remote Addresses which look like:
+   *
+   * macOS:
    * ::1.8911
    * 2606:2800:220:1:248:1893:25c8:1946.443
+   * 127.0.0.1:8000
+   *
+   * ubuntu:
+   * ::1:8907
    * 127.0.0.1:8000
    *
    * NB: They look IPv4 and IPv6's with ports but use an alternative notation.
@@ -129,16 +135,23 @@ class Helper {
     if (!value)
       return;
 
-    const colon = value.lastIndexOf(':');
-    const dot = value.lastIndexOf('.');
     try {
-      if (colon > dot) { // IPv4
+      const colon = value.lastIndexOf(':');
+      const dot = value.lastIndexOf('.');
+      if (dot < 0) { // IPv6ish:port
+        return {
+          ipAddress: `[${value.slice(0, colon)}]`,
+          port: +value.slice(colon + 1)
+        };
+      }
+
+      if (colon > dot) { // IPv4:port
         const [address, port] = value.split(':');
         return {
           ipAddress: address,
           port: +port,
         };
-      } else { // IPv6
+      } else { // IPv6ish.port
         const [address, port] = value.split('.');
         return {
           ipAddress: `[${address}]`,
