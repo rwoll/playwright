@@ -302,16 +302,13 @@ export class CRNetworkManager {
       port: responsePayload.remotePort,
     };
 
-    let securityDetails: network.SecurityDetails | undefined;
-    if (responsePayload.securityDetails) {
-      securityDetails = {
-        protocol: responsePayload.securityDetails.protocol,
-        subjectName: responsePayload.securityDetails.subjectName,
-        issuer: responsePayload.securityDetails.issuer,
-        validFrom: responsePayload.securityDetails.validFrom,
-        validTo: responsePayload.securityDetails.validTo,
-      };
-    }
+    const securityDetails: network.SecurityDetails = {
+      protocol: responsePayload.securityDetails?.protocol,
+      subjectName: responsePayload.securityDetails?.subjectName,
+      issuer: responsePayload.securityDetails?.issuer,
+      validFrom: responsePayload.securityDetails?.validFrom,
+      validTo: responsePayload.securityDetails?.validTo,
+    };
 
     return new network.Response(request.request, responsePayload.status, responsePayload.statusText, headersObjectToArray(responsePayload.headers), timing, getResponseBody, {serverIPAddressAndPort, securityDetails});
   }

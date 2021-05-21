@@ -306,13 +306,18 @@ export class Response extends SdkObject {
     this._url = request.url();
     this._headers = headers;
 
-    const complete = connectionDetails.complete;
-    delete connectionDetails.complete;
-    this._connectionDetails = connectionDetails;
+    const filteredConnectionDetails: ConnectionDetails = {};
+    const serverIPAddressAndPort = filterEmpties(connectionDetails.serverIPAddressAndPort);
+    if (serverIPAddressAndPort)
+      filteredConnectionDetails.serverIPAddressAndPort = serverIPAddressAndPort;
+    const securityDetails = filterEmpties(connectionDetails.securityDetails);
+    if (securityDetails)
+      filteredConnectionDetails.securityDetails = securityDetails;
+    this._connectionDetails = filteredConnectionDetails;
     this._connectionDetailsPromise = new Promise(f => {
       this._connectionDetailsFinishedCallback = f;
     });
-    if (complete ?? true)
+    if (connectionDetails.complete ?? true)
       this._connectionDetailsFinished();
 
     for (const { name, value } of this._headers)
@@ -341,8 +346,7 @@ export class Response extends SdkObject {
       if (securityDetails)
         updated.securityDetails = securityDetails;
 
-      if (Object.keys(updated).length > 0)
-        this._connectionDetails = updated;
+      this._connectionDetails = updated;
     }
 
     this._connectionDetailsFinishedCallback(this._connectionDetails);
@@ -537,9 +541,17 @@ export function mergeHeaders(headers: (types.HeadersArray | undefined | null)[])
   return result;
 }
 
-function mergeUpdates(prev?: { [k: string]: string|number }, updates?: { [k: string]: string|number }) {
-  if (prev && updates)
-    return {...prev, ...updates};
+function filterEmpties(obj: { [k: string]: string|number|undefined } | undefined) {
+  if (obj) {
+    const filtered = Object.entries(obj).filter(([_, v]) => v !== null && v !== undefined).reduce((o, [prop, val]) => { return {...o, [prop]: val};}, {});
+    if (Object.keys(filtered).length > 0)
+      return filtered;
+  }
+}
 
-  return updates || prev;
+function mergeUpdates(prev?: { [k: string]: string|number|undefined }, updates?: { [k: string]: string|number|undefined }) {
+  if (prev && updates)
+    return {...filterEmpties(prev), ...filterEmpties(updates)};
+
+  return filterEmpties(updates || prev || {});
 }

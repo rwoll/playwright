@@ -94,16 +94,13 @@ export class FFNetworkManager {
       port: event.remotePort,
     };
 
-    let securityDetails: network.SecurityDetails | undefined;
-    if (event.securityDetails) {
-      securityDetails = {
-        protocol: event.securityDetails.protocol,
-        subjectName: event.securityDetails.subjectName,
-        issuer: event.securityDetails.issuer,
-        validFrom: event.securityDetails.validFrom,
-        validTo: event.securityDetails.validTo,
-      };
-    }
+    const securityDetails: network.SecurityDetails = {
+      protocol: event.securityDetails?.protocol,
+      subjectName: event.securityDetails?.subjectName,
+      issuer: event.securityDetails?.issuer,
+      validFrom: event.securityDetails?.validFrom,
+      validTo: event.securityDetails?.validTo,
+    };
 
     const response = new network.Response(request.request, event.status, event.statusText, event.headers, timing, getResponseBody, {serverIPAddressAndPort, securityDetails});
     this._page._frameManager.requestReceivedResponse(response);
