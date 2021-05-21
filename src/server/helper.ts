@@ -160,6 +160,29 @@ class Helper {
       }
     } catch (_) {}
   }
+
+  static filterEmpties(obj: { [k: string]: string|number|undefined } | undefined) {
+    if (!obj)
+      return;
+
+    const filtered: { [k: string]: string|number|undefined } = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!v || typeof v === 'number' && v < 0)
+        continue;
+
+      filtered[k] = v;
+    }
+
+    if (Object.keys(filtered).length > 0)
+      return filtered;
+  }
+
+  static mergeUpdates(prev?: { [k: string]: string|number|undefined }, updates?: { [k: string]: string|number|undefined }) {
+    if (prev && updates)
+      return {...Helper.filterEmpties(prev), ...Helper.filterEmpties(updates)};
+
+    return Helper.filterEmpties(updates || prev || {});
+  }
 }
 
 export const helper = Helper;

@@ -18,6 +18,7 @@ import * as frames from './frames';
 import * as types from './types';
 import { assert } from '../utils/utils';
 import { SdkObject } from './instrumentation';
+import { helper } from './helper';
 
 export function filterCookies(cookies: types.NetworkCookie[], urls: string[]): types.NetworkCookie[] {
   const parsedURLs = urls.map(s => new URL(s));
@@ -307,10 +308,10 @@ export class Response extends SdkObject {
     this._headers = headers;
 
     const filteredConnectionDetails: ConnectionDetails = {};
-    const serverIPAddressAndPort = filterEmpties(connectionDetails.serverIPAddressAndPort);
+    const serverIPAddressAndPort = helper.filterEmpties(connectionDetails.serverIPAddressAndPort);
     if (serverIPAddressAndPort)
       filteredConnectionDetails.serverIPAddressAndPort = serverIPAddressAndPort;
-    const securityDetails = filterEmpties(connectionDetails.securityDetails);
+    const securityDetails = helper.filterEmpties(connectionDetails.securityDetails);
     if (securityDetails)
       filteredConnectionDetails.securityDetails = securityDetails;
     this._connectionDetails = filteredConnectionDetails;
@@ -338,11 +339,11 @@ export class Response extends SdkObject {
   _connectionDetailsFinished(connectionDetails?: ConnectionDetails) {
     if (connectionDetails) {
       const updated: ConnectionDetails = {};
-      const serverIPAddressAndPort = mergeUpdates(this._connectionDetails.serverIPAddressAndPort, connectionDetails?.serverIPAddressAndPort);
+      const serverIPAddressAndPort = helper.mergeUpdates(this._connectionDetails.serverIPAddressAndPort, connectionDetails?.serverIPAddressAndPort);
       if (serverIPAddressAndPort)
         updated.serverIPAddressAndPort = serverIPAddressAndPort;
 
-      const securityDetails = mergeUpdates(this._connectionDetails.securityDetails, connectionDetails?.securityDetails);
+      const securityDetails = helper.mergeUpdates(this._connectionDetails.securityDetails, connectionDetails?.securityDetails);
       if (securityDetails)
         updated.securityDetails = securityDetails;
 
@@ -539,16 +540,4 @@ export function mergeHeaders(headers: (types.HeadersArray | undefined | null)[])
   for (const [lower, value] of lowerCaseToValue)
     result.push({ name: lowerCaseToOriginalCase.get(lower)!, value });
   return result;
-}
-
-function filterEmpties(obj: { [k: string]: string|number|undefined } | undefined) {
-  if (obj)
-    return Object.entries(obj).filter(([_, v]) => v !== null && v !== undefined && (typeof v === 'number' ? v >= 0 : v !== '')).reduce((o, [prop, val]) => { const merged = (o || {}); merged[prop] = val; return merged; }, undefined as { [k: string]: string|number|undefined }|undefined);
-}
-
-function mergeUpdates(prev?: { [k: string]: string|number|undefined }, updates?: { [k: string]: string|number|undefined }) {
-  if (prev && updates)
-    return {...filterEmpties(prev), ...filterEmpties(updates)};
-
-  return filterEmpties(updates || prev || {});
 }
