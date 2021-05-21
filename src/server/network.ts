@@ -542,11 +542,8 @@ export function mergeHeaders(headers: (types.HeadersArray | undefined | null)[])
 }
 
 function filterEmpties(obj: { [k: string]: string|number|undefined } | undefined) {
-  if (obj) {
-    const filtered = Object.entries(obj).filter(([_, v]) => v !== null && v !== undefined).reduce((o, [prop, val]) => { return {...o, [prop]: val};}, {});
-    if (Object.keys(filtered).length > 0)
-      return filtered;
-  }
+  if (obj)
+    return Object.entries(obj).filter(([_, v]) => v !== null && v !== undefined && (typeof v === 'number' ? v >= 0 : v !== '')).reduce((o, [prop, val]) => { const merged = (o || {}); merged[prop] = val; return merged; }, undefined as { [k: string]: string|number|undefined }|undefined);
 }
 
 function mergeUpdates(prev?: { [k: string]: string|number|undefined }, updates?: { [k: string]: string|number|undefined }) {
