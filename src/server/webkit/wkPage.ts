@@ -1001,13 +1001,14 @@ export class WKPage implements PageDelegate {
     const response = request.request._existingResponse();
     if (response) {
       const responseReceivedPayload = this._requestIdToResponseReceivedPayloadEvent.get(request._requestId);
-      const securityDetails: network.SecurityDetails = {
+      response._serverIPAddressAndPortFinished(parseRemoteAddress(event?.metrics?.remoteAddress));
+      response._securityDetailsFinished({
         protocol: isLoadedSecurely(response.url(), response.timing()) ? event.metrics?.securityConnection?.protocol : undefined,
         subjectName: responseReceivedPayload?.response.security?.certificate?.subject,
         validFrom: responseReceivedPayload?.response.security?.certificate?.validFrom,
         validTo: responseReceivedPayload?.response.security?.certificate?.validUntil,
-      };
-      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp), undefined, parseRemoteAddress(event?.metrics?.remoteAddress), securityDetails);
+      });
+      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp));
     }
 
     this._requestIdToResponseReceivedPayloadEvent.delete(request._requestId);

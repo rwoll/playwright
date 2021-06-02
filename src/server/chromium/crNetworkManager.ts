@@ -38,7 +38,6 @@ export class CRNetworkManager {
   private _requestIdToRequestPausedEvent = new Map<string, Protocol.Fetch.requestPausedPayload>();
   private _eventListeners: RegisteredListener[];
   private _requestIdToExtraInfo = new Map<string, Protocol.Network.requestWillBeSentExtraInfoPayload>();
-  private readonly _requestIdToResponsePayloadEvent = new Map<string, Protocol.Network.Response>();
 
   constructor(client: CRSession, page: Page, parentManager: CRNetworkManager | null) {
     this._client = client;
@@ -298,8 +297,19 @@ export class CRNetworkManager {
       };
     }
 
-    this._requestIdToResponsePayloadEvent.set(request._requestId, responsePayload);
-    return new network.Response(request.request, responsePayload.status, responsePayload.statusText, headersObjectToArray(responsePayload.headers), timing, getResponseBody);
+    const response = new network.Response(request.request, responsePayload.status, responsePayload.statusText, headersObjectToArray(responsePayload.headers), timing, getResponseBody);
+    response._serverIPAddressAndPortFinished({
+      ipAddress: responsePayload?.remoteIPAddress,
+      port: responsePayload?.remotePort,
+    });
+    response._securityDetailsFinished({
+      protocol: responsePayload?.securityDetails?.protocol,
+      subjectName: responsePayload?.securityDetails?.subjectName,
+      issuer: responsePayload?.securityDetails?.issuer,
+      validFrom: responsePayload?.securityDetails?.validFrom,
+      validTo: responsePayload?.securityDetails?.validTo,
+    });
+    return response;
   }
 
   _handleRequestRedirect(request: InterceptableRequest, responsePayload: Protocol.Network.Response, timestamp: number) {
@@ -333,23 +343,9 @@ export class CRNetworkManager {
     // Under certain conditions we never get the Network.responseReceived
     // event from protocol. @see https://crbug.com/883475
     const response = request.request._existingResponse();
-    if (response) {
-      const responsePayload = this._requestIdToResponsePayloadEvent.get(request._requestId);
-      const serverIPAddressAndPort: network.IPAddressAndPort = {
-        ipAddress: responsePayload?.remoteIPAddress,
-        port: responsePayload?.remotePort,
-      };
-      const securityDetails: network.SecurityDetails = {
-        protocol: responsePayload?.securityDetails?.protocol,
-        subjectName: responsePayload?.securityDetails?.subjectName,
-        issuer: responsePayload?.securityDetails?.issuer,
-        validFrom: responsePayload?.securityDetails?.validFrom,
-        validTo: responsePayload?.securityDetails?.validTo,
-      };
-      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp), undefined, serverIPAddressAndPort, securityDetails);
-    }
+    if (response)
+      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp));
 
-    this._requestIdToResponsePayloadEvent.delete(request._requestId);
     this._requestIdToRequest.delete(request._requestId);
     if (request._interceptionId)
       this._attemptedAuthentications.delete(request._interceptionId);

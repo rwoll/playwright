@@ -289,10 +289,7 @@ it('should have connection details', async ({ contextFactory, server, browserNam
   const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
   expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
   expect(port).toBe(server.PORT);
-  if (browserName === 'webkit' && platform === 'darwin')
-    expect(securityDetails).toEqual({protocol: 'SSL 2.0'});
-  else
-    expect(securityDetails).toBeUndefined();
+  expect(securityDetails).toBeUndefined();
 });
 
 it('should have security details', async ({ contextFactory, httpsServer, browserName, platform }, testInfo) => {
@@ -310,4 +307,35 @@ it('should have security details', async ({ contextFactory, httpsServer, browser
     expect(securityDetails).toEqual({protocol: 'TLS 1.3', subjectName: 'puppeteer-tests', validFrom: 1550084863, validTo: 33086084863});
   else
     expect(securityDetails).toEqual({issuer: 'puppeteer-tests', protocol: 'TLS 1.3', subjectName: 'puppeteer-tests', validFrom: 1550084863, validTo: 33086084863});
+});
+
+it('should have connection details for redirects', async ({ contextFactory, server, browserName }, testInfo) => {
+  it.fail(browserName === 'webkit');
+
+  server.setRedirect('/foo.html', '/empty.html');
+  const { page, getLog } = await pageWithHar(contextFactory, testInfo);
+  await page.goto(server.PREFIX + '/foo.html');
+  const log = await getLog();
+  expect(log.entries.length).toBe(2);
+
+  const detailsFoo = log.entries[0];
+  expect(detailsFoo.serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+  expect(detailsFoo._serverPort).toBe(server.PORT);
+
+  const detailsEmpty = log.entries[0];
+  expect(detailsEmpty.serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+  expect(detailsEmpty._serverPort).toBe(server.PORT);
+});
+
+it('should have connection details for failed requests', async ({ contextFactory, server, browserName, platform }, testInfo) => {
+  server.setRoute('/one-style.css', (_, res) => {
+    res.setHeader('Content-Type', 'text/css');
+    res.connection.destroy();
+  });
+  const { page, getLog } = await pageWithHar(contextFactory, testInfo);
+  await page.goto(server.PREFIX + '/one-style.html');
+  const log = await getLog();
+  const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
+  expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+  expect(port).toBe(server.PORT);
 });

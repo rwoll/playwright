@@ -29,8 +29,6 @@ export class FFNetworkManager {
   private _page: Page;
   private _eventListeners: RegisteredListener[];
   private _startTime = 0;
-  private readonly _requestIdToResponseReceivedPayloadEvent = new Map<string, Protocol.Network.responseReceivedPayload>();
-
 
   constructor(session: FFSession, page: Page) {
     this._session = session;
@@ -91,8 +89,18 @@ export class FFNetworkManager {
       responseStart: this._relativeTiming(event.timing.responseStart),
     };
 
-    this._requestIdToResponseReceivedPayloadEvent.set(request._id, event);
     const response = new network.Response(request.request, event.status, event.statusText, event.headers, timing, getResponseBody);
+    response._serverIPAddressAndPortFinished({
+      ipAddress: event?.remoteIPAddress,
+      port: event?.remotePort,
+    });
+    response._securityDetailsFinished({
+      protocol: event?.securityDetails?.protocol,
+      subjectName: event?.securityDetails?.subjectName,
+      issuer: event?.securityDetails?.issuer,
+      validFrom: event?.securityDetails?.validFrom,
+      validTo: event?.securityDetails?.validTo,
+    });
     this._page._frameManager.requestReceivedResponse(response);
   }
 
@@ -101,26 +109,13 @@ export class FFNetworkManager {
     if (!request)
       return;
     const response = request.request._existingResponse()!;
-    const responseReceivedPayload = this._requestIdToResponseReceivedPayloadEvent.get(request._id);
-    const serverIPAddressAndPort: network.IPAddressAndPort = {
-      ipAddress: responseReceivedPayload?.remoteIPAddress,
-      port: responseReceivedPayload?.remotePort,
-    };
-    const securityDetails: network.SecurityDetails = {
-      protocol: responseReceivedPayload?.securityDetails?.protocol,
-      subjectName: responseReceivedPayload?.securityDetails?.subjectName,
-      issuer: responseReceivedPayload?.securityDetails?.issuer,
-      validFrom: responseReceivedPayload?.securityDetails?.validFrom,
-      validTo: responseReceivedPayload?.securityDetails?.validTo,
-    };
     // Keep redirected requests in the map for future reference as redirectedFrom.
     const isRedirected = response.status() >= 300 && response.status() <= 399;
     if (isRedirected) {
-      response._requestFinished(this._relativeTiming(event.responseEndTime), 'Response body is unavailable for redirect responses', serverIPAddressAndPort, securityDetails);
+      response._requestFinished(this._relativeTiming(event.responseEndTime), 'Response body is unavailable for redirect responses');
     } else {
       this._requests.delete(request._id);
-      this._requestIdToResponseReceivedPayloadEvent.delete(request._id);
-      response._requestFinished(this._relativeTiming(event.responseEndTime), undefined, serverIPAddressAndPort, securityDetails);
+      response._requestFinished(this._relativeTiming(event.responseEndTime));
     }
     this._page._frameManager.requestFinished(request.request);
   }

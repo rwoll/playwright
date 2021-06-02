@@ -289,8 +289,10 @@ export class Response extends SdkObject {
   private _headersMap = new Map<string, string>();
   private _getResponseBodyCallback: GetResponseBodyCallback;
   private _timing: ResourceTiming;
-  private _serverIPAddressAndPort?: IPAddressAndPort;
-  private _securityDetails?: SecurityDetails;
+  private _serverIPAddressAndPortPromise: Promise<IPAddressAndPort|undefined>;
+  private _serverIPAddressAndPortPromiseCallback: (arg?: IPAddressAndPort) => void = () => {};
+  private _securityDetailsPromise: Promise<SecurityDetails|undefined>;
+  private _securityDetailsPromiseCallback: (arg?: SecurityDetails) => void = () => {};
 
   constructor(request: Request, status: number, statusText: string, headers: types.HeadersArray, timing: ResourceTiming, getResponseBodyCallback: GetResponseBodyCallback) {
     super(request.frame(), 'response');
@@ -303,15 +305,27 @@ export class Response extends SdkObject {
     for (const { name, value } of this._headers)
       this._headersMap.set(name.toLowerCase(), value);
     this._getResponseBodyCallback = getResponseBodyCallback;
+    this._serverIPAddressAndPortPromise = new Promise(f => {
+      this._serverIPAddressAndPortPromiseCallback = f;
+    });
+    this._securityDetailsPromise = new Promise(f => {
+      this._securityDetailsPromiseCallback = f;
+    });
     this._finishedPromise = new Promise(f => {
       this._finishedPromiseCallback = f;
     });
     this._request._setResponse(this);
   }
 
-  _requestFinished(responseEndTiming: number, error?: string, serverIPAddressAndPort?: IPAddressAndPort, securityDetails?: SecurityDetails) {
-    this._serverIPAddressAndPort = helper.filterEmpties(serverIPAddressAndPort);
-    this._securityDetails = helper.filterEmpties(securityDetails);
+  _serverIPAddressAndPortFinished(serverIPAddress?: IPAddressAndPort) {
+    this._serverIPAddressAndPortPromiseCallback(helper.filterEmpties(serverIPAddress));
+  }
+
+  _securityDetailsFinished(securityDetails?: SecurityDetails) {
+    this._securityDetailsPromiseCallback(helper.filterEmpties(securityDetails));
+  }
+
+  _requestFinished(responseEndTiming: number, error?: string) {
     this._request._responseEndTiming = Math.max(responseEndTiming, this._timing.responseStart);
     this._finishedPromiseCallback({ error });
   }
@@ -345,13 +359,11 @@ export class Response extends SdkObject {
   }
 
   async serverIPAddressAndPort(): Promise<IPAddressAndPort|null> {
-    await this._finishedPromise.catch(() => {});
-    return this._serverIPAddressAndPort || null;
+    return await this._serverIPAddressAndPortPromise || null;
   }
 
   async securityDetails(): Promise<SecurityDetails|null> {
-    await this._finishedPromise.catch(() => {});
-    return this._securityDetails || null;
+    return await this._securityDetailsPromise || null;
   }
 
   body(): Promise<Buffer> {
