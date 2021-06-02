@@ -335,7 +335,7 @@ it('should have connection details for failed requests', async ({ contextFactory
   const { page, getLog } = await pageWithHar(contextFactory, testInfo);
   await page.goto(server.PREFIX + '/one-style.html');
   const log = await getLog();
-  const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
+  const { serverIPAddress, _serverPort: port } = log.entries[0];
   expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
   expect(port).toBe(server.PORT);
 });

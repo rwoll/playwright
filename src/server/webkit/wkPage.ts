@@ -948,6 +948,8 @@ export class WKPage implements PageDelegate {
 
   private _handleRequestRedirect(request: WKInterceptableRequest, responsePayload: Protocol.Network.Response, timestamp: number) {
     const response = request.createResponse(responsePayload);
+    response._securityDetailsFinished();
+    response._serverIPAddressAndPortFinished();
     response._requestFinished(responsePayload.timing ? helper.secondsToRoundishMillis(timestamp - request._timestamp) : -1, 'Response body is unavailable for redirect responses');
     this._requestIdToRequest.delete(request._requestId);
     this._page._frameManager.requestReceivedResponse(response);
@@ -1023,8 +1025,11 @@ export class WKPage implements PageDelegate {
     if (!request)
       return;
     const response = request.request._existingResponse();
-    if (response)
+    if (response) {
+      response._serverIPAddressAndPortFinished();
+      response._securityDetailsFinished();
       response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp));
+    }
     this._requestIdToRequest.delete(request._requestId);
     request.request._setFailureText(event.errorText);
     this._page._frameManager.requestFailed(request.request, event.errorText.includes('cancelled'));
