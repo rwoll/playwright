@@ -296,15 +296,15 @@ it('should have connection details', async ({ contextFactory, server, browserNam
 });
 
 it('should have security details', async ({ contextFactory, httpsServer, browserName, platform }, testInfo) => {
+  it.fail(browserName === 'webkit' && platform === 'linux', 'https://github.com/microsoft/playwright/issues/6759');
+
   const { page, getLog } = await pageWithHar(contextFactory, testInfo);
   await page.goto(httpsServer.EMPTY_PAGE);
   const log = await getLog();
   const { serverIPAddress, _serverPort: port, _securityDetails: securityDetails } = log.entries[0];
   expect(serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
   expect(port).toBe(httpsServer.PORT);
-  if (browserName === 'webkit' && platform === 'linux')
-    expect(securityDetails).toBeUndefined();
-  else if (browserName === 'webkit' && platform === 'win32')
+  if (browserName === 'webkit' && platform === 'win32')
     expect(securityDetails).toEqual({subjectName: 'puppeteer-tests', validFrom: 1550084863});
   else if (browserName === 'webkit')
     expect(securityDetails).toEqual({protocol: 'TLS 1.3', subjectName: 'puppeteer-tests', validFrom: 1550084863, validTo: 33086084863});
