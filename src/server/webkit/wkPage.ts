@@ -1046,7 +1046,7 @@ function webkitWorldName(world: types.World) {
 
 function serverIPAddressAndPort(event: Protocol.Network.loadingFinishedPayload): network.IPAddressAndPort | undefined {
   if (event.metrics)
-    return helper.parseRemoteAddress(event.metrics.remoteAddress);
+    return parseRemoteAddress(event.metrics.remoteAddress);
 }
 
 function securityDetails(event: Protocol.Network.loadingFinishedPayload): network.SecurityDetails | undefined {
@@ -1055,4 +1055,48 @@ function securityDetails(event: Protocol.Network.loadingFinishedPayload): networ
       protocol: event.metrics.securityConnection?.protocol,
     };
   }
+}
+
+/**
+ * WebKit Remote Addresses look like:
+ *
+ * macOS:
+ * ::1.8911
+ * 2606:2800:220:1:248:1893:25c8:1946.443
+ * 127.0.0.1:8000
+ *
+ * ubuntu:
+ * ::1:8907
+ * 127.0.0.1:8000
+ *
+ * NB: They look IPv4 and IPv6's with ports but use an alternative notation.
+ */
+function parseRemoteAddress(value?: string) {
+  if (!value)
+    return;
+
+  try {
+    const colon = value.lastIndexOf(':');
+    const dot = value.lastIndexOf('.');
+    if (dot < 0) { // IPv6ish:port
+      return {
+        ipAddress: `[${value.slice(0, colon)}]`,
+        port: +value.slice(colon + 1)
+      };
+    }
+
+    if (colon > dot) { // IPv4:port
+      const [address, port] = value.split(':');
+      return {
+        ipAddress: address,
+        port: +port,
+      };
+    } else { // IPv6ish.port
+      const [address, port] = value.split('.');
+      return {
+        ipAddress: `[${address}]`,
+        port: +port,
+      };
+    }
+  } catch (_) {}
 }
