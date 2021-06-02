@@ -277,11 +277,6 @@ export type SecurityDetails = {
     validTo?: number;
 };
 
-export type ConnectionDetails = {
-  serverIPAddressAndPort?: IPAddressAndPort;
-  securityDetails?: SecurityDetails;
-}
-
 export class Response extends SdkObject {
   private _request: Request;
   private _contentPromise: Promise<Buffer> | null = null;
@@ -294,11 +289,10 @@ export class Response extends SdkObject {
   private _headersMap = new Map<string, string>();
   private _getResponseBodyCallback: GetResponseBodyCallback;
   private _timing: ResourceTiming;
-  private _connectionDetails: ConnectionDetails;
-  private _connectionDetailsFinishedCallback: (details: ConnectionDetails) => void = _ => {};
-  private _connectionDetailsPromise: Promise<ConnectionDetails>;
+  private _serverIPAddressAndPort?: IPAddressAndPort;
+  private _securityDetails?: SecurityDetails;
 
-  constructor(request: Request, status: number, statusText: string, headers: types.HeadersArray, timing: ResourceTiming, getResponseBodyCallback: GetResponseBodyCallback, connectionDetails: ConnectionDetails & {complete?: boolean}) {
+  constructor(request: Request, status: number, statusText: string, headers: types.HeadersArray, timing: ResourceTiming, getResponseBodyCallback: GetResponseBodyCallback) {
     super(request.frame(), 'response');
     this._request = request;
     this._timing = timing;
@@ -306,21 +300,6 @@ export class Response extends SdkObject {
     this._statusText = statusText;
     this._url = request.url();
     this._headers = headers;
-
-    const filteredConnectionDetails: ConnectionDetails = {};
-    const serverIPAddressAndPort = helper.filterEmpties(connectionDetails.serverIPAddressAndPort);
-    if (serverIPAddressAndPort)
-      filteredConnectionDetails.serverIPAddressAndPort = serverIPAddressAndPort;
-    const securityDetails = helper.filterEmpties(connectionDetails.securityDetails);
-    if (securityDetails)
-      filteredConnectionDetails.securityDetails = securityDetails;
-    this._connectionDetails = filteredConnectionDetails;
-    this._connectionDetailsPromise = new Promise(f => {
-      this._connectionDetailsFinishedCallback = f;
-    });
-    if (connectionDetails.complete ?? true)
-      this._connectionDetailsFinished();
-
     for (const { name, value } of this._headers)
       this._headersMap.set(name.toLowerCase(), value);
     this._getResponseBodyCallback = getResponseBodyCallback;
@@ -330,27 +309,11 @@ export class Response extends SdkObject {
     this._request._setResponse(this);
   }
 
-  _requestFinished(responseEndTiming: number, error?: string, connectionDetails?: ConnectionDetails) {
-    this._connectionDetailsFinished(connectionDetails);
+  _requestFinished(responseEndTiming: number, error?: string, serverIPAddressAndPort?: IPAddressAndPort, securityDetails?: SecurityDetails) {
+    this._serverIPAddressAndPort = helper.filterEmpties(serverIPAddressAndPort);
+    this._securityDetails = helper.filterEmpties(securityDetails);
     this._request._responseEndTiming = Math.max(responseEndTiming, this._timing.responseStart);
     this._finishedPromiseCallback({ error });
-  }
-
-  _connectionDetailsFinished(connectionDetails?: ConnectionDetails) {
-    if (connectionDetails) {
-      const updated: ConnectionDetails = {};
-      const serverIPAddressAndPort = helper.mergeUpdates(this._connectionDetails.serverIPAddressAndPort, connectionDetails?.serverIPAddressAndPort);
-      if (serverIPAddressAndPort)
-        updated.serverIPAddressAndPort = serverIPAddressAndPort;
-
-      const securityDetails = helper.mergeUpdates(this._connectionDetails.securityDetails, connectionDetails?.securityDetails);
-      if (securityDetails)
-        updated.securityDetails = securityDetails;
-
-      this._connectionDetails = updated;
-    }
-
-    this._connectionDetailsFinishedCallback(this._connectionDetails);
   }
 
   url(): string {
@@ -382,13 +345,13 @@ export class Response extends SdkObject {
   }
 
   async serverIPAddressAndPort(): Promise<IPAddressAndPort|null> {
-    const { serverIPAddressAndPort } = await this._connectionDetailsPromise;
-    return serverIPAddressAndPort || null;
+    await this._finishedPromise.catch(() => {});
+    return this._serverIPAddressAndPort || null;
   }
 
   async securityDetails(): Promise<SecurityDetails|null> {
-    const { securityDetails } = await this._connectionDetailsPromise;
-    return securityDetails || null;
+    await this._finishedPromise.catch(() => {});
+    return this._securityDetails || null;
   }
 
   body(): Promise<Buffer> {

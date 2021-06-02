@@ -127,15 +127,7 @@ export class WKInterceptableRequest implements network.RouteDelegate {
       responseStart: timingPayload ? wkMillisToRoundishMillis(timingPayload.responseStart) : -1,
     };
 
-    const securityDetails: network.SecurityDetails = {
-      protocol: responsePayload.security?.connection?.protocol,
-      subjectName: responsePayload.security?.certificate?.subject,
-      validFrom: responsePayload.security?.certificate?.validFrom,
-      validTo: responsePayload.security?.certificate?.validUntil,
-    };
-
-
-    return new network.Response(this.request, responsePayload.status, responsePayload.statusText, headersObjectToArray(responsePayload.headers), timing, getResponseBody, {securityDetails, complete: false});
+    return new network.Response(this.request, responsePayload.status, responsePayload.statusText, headersObjectToArray(responsePayload.headers), timing, getResponseBody);
   }
 }
 

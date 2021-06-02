@@ -132,13 +132,6 @@ class Helper {
     if (Object.keys(filtered).length > 0)
       return filtered;
   }
-
-  static mergeUpdates(prev?: { [k: string]: string|number|undefined }, updates?: { [k: string]: string|number|undefined }) {
-    if (prev && updates)
-      return {...Helper.filterEmpties(prev), ...Helper.filterEmpties(updates)};
-
-    return Helper.filterEmpties(updates || prev || {});
-  }
 }
 
 export const helper = Helper;

@@ -68,7 +68,7 @@ export class WKPage implements PageDelegate {
   private _firstNonInitialNavigationCommittedFulfill = () => {};
   _firstNonInitialNavigationCommittedReject = (e: Error) => {};
   private _lastConsoleMessage: { derivedType: string, text: string, handles: JSHandle[]; count: number, location: types.ConsoleMessageLocation; } | null = null;
-
+  private readonly _requestIdToResponseReceivedPayloadEvent = new Map<string, Protocol.Network.responseReceivedPayload>();
   // Holds window features for the next popup being opened via window.open,
   // until the popup page proxy arrives.
   private _nextWindowOpenPopupFeatures?: string[];
@@ -974,6 +974,7 @@ export class WKPage implements PageDelegate {
     // FileUpload sends a response without a matching request.
     if (!request)
       return;
+    this._requestIdToResponseReceivedPayloadEvent.set(request._requestId, event);
     const response = request.createResponse(event.response);
     if (event.response.requestHeaders && Object.keys(event.response.requestHeaders).length)
       request.request.updateWithRawHeaders(headersObjectToArray(event.response.requestHeaders));
@@ -998,9 +999,18 @@ export class WKPage implements PageDelegate {
     // Under certain conditions we never get the Network.responseReceived
     // event from protocol. @see https://crbug.com/883475
     const response = request.request._existingResponse();
-    if (response)
-      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp), undefined, {serverIPAddressAndPort: serverIPAddressAndPort(event), securityDetails: securityDetails(event)});
+    if (response) {
+      const responseReceivedPayload = this._requestIdToResponseReceivedPayloadEvent.get(request._requestId);
+      const securityDetails: network.SecurityDetails = {
+        protocol: isLoadedSecurely(response.url(), response.timing()) ? event.metrics?.securityConnection?.protocol : undefined,
+        subjectName: responseReceivedPayload?.response.security?.certificate?.subject,
+        validFrom: responseReceivedPayload?.response.security?.certificate?.validFrom,
+        validTo: responseReceivedPayload?.response.security?.certificate?.validUntil,
+      };
+      response._requestFinished(helper.secondsToRoundishMillis(event.timestamp - request._timestamp), undefined, parseRemoteAddress(event?.metrics?.remoteAddress), securityDetails);
+    }
 
+    this._requestIdToResponseReceivedPayloadEvent.delete(request._requestId);
     this._requestIdToRequest.delete(request._requestId);
     this._page._frameManager.requestFinished(request.request);
   }
@@ -1041,19 +1051,6 @@ function webkitWorldName(world: types.World) {
   switch (world) {
     case 'main': return undefined;
     case 'utility': return UTILITY_WORLD_NAME;
-  }
-}
-
-function serverIPAddressAndPort(event: Protocol.Network.loadingFinishedPayload): network.IPAddressAndPort | undefined {
-  if (event.metrics)
-    return parseRemoteAddress(event.metrics.remoteAddress);
-}
-
-function securityDetails(event: Protocol.Network.loadingFinishedPayload): network.SecurityDetails | undefined {
-  if (event.metrics) {
-    return {
-      protocol: event.metrics.securityConnection?.protocol,
-    };
   }
 }
 
@@ -1098,5 +1095,21 @@ function parseRemoteAddress(value?: string) {
         port: +port,
       };
     }
+  } catch (_) {}
+}
+
+
+/**
+ * Adapted from Source/WebInspectorUI/UserInterface/Models/Resource.js in
+ * WebKit codebase.
+ */
+function isLoadedSecurely(url: string, timing: network.ResourceTiming) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' && u.protocol !== 'wss:' && u.protocol !== 'sftp:')
+      return false;
+    if (timing.secureConnectionStart === -1 && timing.connectStart !== -1)
+      return false;
+    return true;
   } catch (_) {}
 }
