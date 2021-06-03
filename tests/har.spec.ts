@@ -310,8 +310,6 @@ it('should have security details', async ({ contextFactory, httpsServer, browser
 });
 
 it('should have connection details for redirects', async ({ contextFactory, server, browserName }, testInfo) => {
-  it.fail(browserName === 'webkit');
-
   server.setRedirect('/foo.html', '/empty.html');
   const { page, getLog } = await pageWithHar(contextFactory, testInfo);
   await page.goto(server.PREFIX + '/foo.html');
@@ -319,10 +317,16 @@ it('should have connection details for redirects', async ({ contextFactory, serv
   expect(log.entries.length).toBe(2);
 
   const detailsFoo = log.entries[0];
-  expect(detailsFoo.serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
-  expect(detailsFoo._serverPort).toBe(server.PORT);
 
-  const detailsEmpty = log.entries[0];
+  if (browserName === 'webkit') {
+    expect(detailsFoo.serverIPAddress).toBeUndefined();
+    expect(detailsFoo._serverPort).toBeUndefined();
+  } else {
+    expect(detailsFoo.serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
+    expect(detailsFoo._serverPort).toBe(server.PORT);
+  }
+
+  const detailsEmpty = log.entries[1];
   expect(detailsEmpty.serverIPAddress).toMatch(/^127\.0\.0\.1|\[::1\]/);
   expect(detailsEmpty._serverPort).toBe(server.PORT);
 });
