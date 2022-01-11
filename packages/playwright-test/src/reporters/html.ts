@@ -26,6 +26,25 @@ import RawReporter, { JsonReport, JsonSuite, JsonTestCase, JsonTestResult, JsonT
 import assert from 'assert';
 import yazl from 'yazl';
 import { stripAnsiEscapes } from './base';
+import os from 'os';
+import { promisify } from 'util';
+import rimraf from 'rimraf';
+import { DefinePlugin, webpack } from 'webpack';
+import HtmlWebpackPlugin from 'html-webpack-plugin';
+import BundleJsPlugin from './helpers/bundleJsPlugin';
+const removeFolderAsync = promisify(rimraf);
+
+// NB: This works for this very specific use case. It's far from optimized and has
+// some non-intuitive behavior. DO NOT COPY :)
+const copyFolderAsync = async (src: string, dst: string) => {
+  await fs.promises.mkdir(dst, { recursive: true });
+  for (const name of await fs.promises.readdir(src)) {
+    const p = path.join(src, name);
+    const stat = await fs.promises.stat(p);
+    if (stat.isDirectory()) await copyFolderAsync(p, path.join(dst, name));
+    else await fs.promises.copyFile(p, path.join(dst, name));
+  }
+};
 
 export type Stats = {
   total: number;
@@ -114,6 +133,17 @@ type TestEntry = {
   testCaseSummary: TestCaseSummary
 };
 
+export interface ComponentProps {
+  Header: HTMLReport | undefined;
+}
+
+export type CreateComponent<T> = {
+  [P in keyof T]: (props: T[P]) => JSX.Element
+};
+
+export type Components = Partial<CreateComponent<ComponentProps> & { renderAttachment: (attachment: TestAttachment) => JSX.Element | null; }>;
+
+
 const kMissingContentType = 'x-playwright/missing';
 
 class HtmlReporter implements Reporter {
@@ -146,7 +176,7 @@ class HtmlReporter implements Reporter {
     });
     const reportFolder = htmlReportFolder(this._outputFolder);
     await removeFolders([reportFolder]);
-    const builder = new HtmlBuilder(reportFolder);
+    const builder = new HtmlBuilder(reportFolder, this.config);
     const { ok, singleTestId } = await builder.build(reports);
 
     if (process.env.PWTEST_SKIP_TEST_OUTPUT || process.env.CI)
@@ -223,9 +253,11 @@ class HtmlBuilder {
   private _testPath = new Map<string, string[]>();
   private _dataZipFile: yazl.ZipFile;
   private _hasTraces = false;
+  private _playwrightConfig: FullConfig;
 
-  constructor(outputDir: string) {
+  constructor(outputDir: string, playwrightConfig: FullConfig) {
     this._reportFolder = path.resolve(process.cwd(), outputDir);
+    this._playwrightConfig = playwrightConfig;
     fs.mkdirSync(this._reportFolder, { recursive: true });
     this._dataZipFile = new yazl.ZipFile();
   }
@@ -332,6 +364,13 @@ class HtmlBuilder {
     });
     fs.appendFileSync(indexFile, '";</script>');
 
+    // Inline user-land plugins
+    const pluginsDir = process.env['PLAYWRIGHT_HTML_REPORT_PLUGINS_DIRECTORY'];
+    const nodeModules = process.env['PLAYWRIGHT_HTML_REPORT_PLUGINS_NODE_MODULES'] || path.resolve(path.join(this._playwrightConfig.rootDir, 'node_modules'));
+    if (pluginsDir)
+      await this.generateWithPlugins(pluginsDir, indexFile, nodeModules);
+
+
     let singleTestId: string | undefined;
     if (htmlReport.stats.total === 1) {
       const testFile: TestFile  = data.values().next().value.testFile;
@@ -339,6 +378,100 @@ class HtmlBuilder {
     }
 
     return { ok, singleTestId };
+  }
+
+  private async generateWithPlugins(pluginsDir: string, indexFile: string, nodeModules: string) {
+    const workspace = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'playwright-report-rendering-workspace-'));
+    try {
+      await copyFolderAsync(pluginsDir, path.join(workspace, 'plugins'));
+      await fs.promises.writeFile(path.join(workspace, 'index.ts'), `
+          import * as React from "react";
+          import ReactDOM from "react-dom";
+          const components = require("./plugins/index").default;
+          export default {
+            components,
+            mount: (name: string, props: any, root: Element) => {
+              console.log("mount called for ", name);
+              ReactDOM.render(React.createElement(components[name], props), root);
+              return () => {
+                console.log("dismount called for ", name);
+                ReactDOM.unmountComponentAtNode(root);
+              };
+            }
+          };
+        `);
+      await fs.promises.copyFile(indexFile, path.join(workspace, 'index.html'));
+      await new Promise<void>((res, rej) => webpack({
+        dependencies: [nodeModules],
+        mode: 'development',
+        context: workspace,
+        entry: {
+          plugins: path.join(workspace, 'index.ts'),
+        },
+        resolve: {
+          extensions: ['.ts', '.js', '.tsx', '.jsx'],
+          modules: [nodeModules],
+        },
+        resolveLoader: {
+          modules: [nodeModules],
+        },
+        devtool: 'source-map',
+        output: {
+          globalObject: 'self',
+          library: 'PlaywrightPlugins',
+          filename: '[name].bundle.js',
+          path: path.resolve(path.join(workspace, 'build')),
+        },
+        module: {
+          rules: [
+            {
+              test: /\.(j|t)sx?$/,
+              loader: 'babel-loader',
+              options: {
+                presets: [
+                  '@babel/preset-typescript',
+                  ['@babel/preset-react', { 'runtime': 'automatic' }],
+                ]
+              },
+              exclude: /node_modules/,
+            },
+            {
+              test: /\.css$/,
+              use: ['style-loader', 'css-loader'],
+            },
+          ]
+        },
+        plugins: [
+          new DefinePlugin({
+            'process.env': JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([n]) => n.startsWith('PLAYWRIGHT_REPORT_ENV')))),
+          }),
+          new HtmlWebpackPlugin({
+            title: 'Playwright Test Report',
+            template: path.join(workspace, 'index.html'),
+            inject: true,
+          }),
+          new BundleJsPlugin(),
+        ],
+      }, async (err, stats) => {
+        console.log('error', err);
+        if (err)
+          return rej(err);
+        if (!stats)
+          return rej('no stats');
+        const info = stats.toJson();
+        console.log('hasErrors', stats.hasErrors());
+        console.log('STATS', JSON.stringify(info, null, '  '));
+        if (stats.hasErrors())
+          return rej(err);
+        await fs.promises.rename(path.join(workspace, 'build', 'index.html'), indexFile);
+        console.log('renamed to', indexFile);
+        return res();
+      })).catch(e => {
+        console.log('error generating plugin based report.', e);
+      });
+    } finally {
+      await removeFolderAsync(workspace);
+    }
   }
 
   private _addDataFile(fileName: string, data: any) {

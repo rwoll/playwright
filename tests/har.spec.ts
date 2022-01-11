@@ -37,9 +37,12 @@ async function pageWithHar(contextFactory: (options?: BrowserContextOptions) => 
   };
 }
 
-it('should throw without path', async ({ browser }) => {
-  const error = await browser.newContext({ recordHar: {} as any }).catch(e => e);
-  expect(error.message).toContain('recordHar.path: expected string, got undefined');
+it.only('should throw without path', async ({}, testInfo) => {
+  await testInfo.attach('example.json', { contentType: 'application/json', body: '{a: 1}' });
+  await testInfo.attach('diagnostics', { contentType: 'application/json', body: JSON.stringify({
+    productUrl: 'https://example.com/my/awesome/product/page'
+  }) });
+  expect(1).toBe(2);
 });
 
 it('should have version and creator', async ({ contextFactory, server }, testInfo) => {
@@ -670,4 +673,3 @@ it('should include API request', async ({ contextFactory, server }, testInfo) =>
   expect(entry.response.content.size).toBe(15);
   expect(entry.response.content.text).toBe(responseBody.toString('base64'));
 });
-

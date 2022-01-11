@@ -22,6 +22,7 @@ import { Filter } from './filter';
 import { HeaderView } from './headerView';
 import { Route } from './links';
 import { LoadedReport } from './loadedReport';
+import { PluginComponent } from './PluginComponent';
 import './reportView.css';
 import { TestCaseView } from './testCaseView';
 import { TestFilesView } from './testFilesView';
@@ -39,10 +40,10 @@ export const ReportView: React.FC<{
   const searchParams = new URLSearchParams(window.location.hash.slice(1));
   const [expandedFiles, setExpandedFiles] = React.useState<Map<string, boolean>>(new Map());
   const [filterText, setFilterText] = React.useState(searchParams.get('q') || '');
-
   const filter = React.useMemo(() => Filter.parse(filterText), [filterText]);
 
   return <div className='htmlreport vbox px-4'>
+    <PluginComponent name={'Header'} props={report?.json()} />
     {report?.json() && <HeaderView stats={report.json().stats} filterText={filterText} setFilterText={setFilterText}></HeaderView>}
     {<>
       <Route params=''>
