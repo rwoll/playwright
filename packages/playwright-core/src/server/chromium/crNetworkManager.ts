@@ -16,7 +16,7 @@
  */
 
 import { CRSession } from './crConnection';
-import { Page } from '../page';
+import { Page, PageDelegate } from '../page';
 import { helper } from '../helper';
 import { eventsHelper, RegisteredListener } from '../../utils/eventsHelper';
 import { Protocol } from './protocol';
@@ -26,9 +26,76 @@ import * as types from '../types';
 import { CRPage } from './crPage';
 import { assert, headersObjectToArray } from '../../utils/utils';
 
+type NetworkOwner = Pick<frames.FrameManager, 'requestFailed' | 'requestStarted' | 'requestReceivedResponse' | 'reportRequestFinished' | 'onWebSocketCreated' | 'onWebSocketRequest' | 'onWebSocketResponse' | 'onWebSocketFrameSent' | 'webSocketFrameReceived' | 'webSocketClosed' | 'webSocketError' | 'frame' | 'frameAttached'> & Pick<Page, '_needsRequestInterception' | '_delegate'>;
+
+class NO implements NetworkOwner {
+  _page: Page;
+  _delegate: PageDelegate;
+
+  constructor(page: Page) {
+    this._page = page;
+    this._delegate = this._page._delegate;
+  }
+
+  requestFailed(request: network.Request, canceled: boolean): void {
+    this._page._frameManager.requestFailed(request, canceled);
+  }
+
+  requestStarted(request: network.Request, route?: network.RouteDelegate): void {
+    this._page._frameManager.requestStarted(request, route);
+  }
+
+  requestReceivedResponse(response: network.Response): void {
+    this._page._frameManager.requestReceivedResponse(response);
+  }
+
+  reportRequestFinished(request: network.Request, response: network.Response | null): void {
+    this._page._frameManager.reportRequestFinished(request, response);
+  }
+
+  onWebSocketCreated(requestId: string, url: string): void {
+    this._page._frameManager.onWebSocketCreated(requestId, url);
+  }
+
+  onWebSocketRequest(requestId: string): void {
+    this._page._frameManager.onWebSocketRequest(requestId);
+  }
+
+  onWebSocketResponse(requestId: string, status: number, statusText: string): void {
+    this._page._frameManager.onWebSocketResponse(requestId, status, statusText);
+  }
+
+  onWebSocketFrameSent(requestId: string, opcode: number, data: string): void {
+    this._page._frameManager.onWebSocketFrameSent(requestId, opcode, data);
+  }
+
+  webSocketFrameReceived(requestId: string, opcode: number, data: string): void {
+    this._page._frameManager.webSocketFrameReceived(requestId, opcode, data);
+  }
+
+  webSocketClosed(requestId: string): void {
+    this._page._frameManager.webSocketClosed(requestId);
+  }
+  webSocketError(requestId: string, errorMessage: string): void {
+    this._page._frameManager.webSocketError(requestId, errorMessage);
+  }
+
+  frame(frameId: string): frames.Frame | null {
+    return this._page._frameManager.frame(frameId);
+  }
+
+  frameAttached(frameId: string, parentFrameId: string | null | undefined): frames.Frame {
+    return this._page._frameManager.frameAttached(frameId, parentFrameId);
+  }
+
+  _needsRequestInterception(): boolean {
+    return this._page._needsRequestInterception();
+  }
+}
+
 export class CRNetworkManager {
   private _client: CRSession;
-  private _page: Page;
+  private _networkOwner: NetworkOwner;
   private _parentManager: CRNetworkManager | null;
   private _requestIdToRequest = new Map<string, InterceptableRequest>();
   private _requestIdToRequestWillBeSentEvent = new Map<string, Protocol.Network.requestWillBeSentPayload>();
@@ -42,7 +109,7 @@ export class CRNetworkManager {
 
   constructor(client: CRSession, page: Page, parentManager: CRNetworkManager | null) {
     this._client = client;
-    this._page = page;
+    this._networkOwner = new NO(page);
     this._parentManager = parentManager;
     this._eventListeners = this.instrumentNetworkEvents(client);
   }
@@ -58,13 +125,13 @@ export class CRNetworkManager {
       eventsHelper.addEventListener(session, 'Network.responseReceivedExtraInfo', this._onResponseReceivedExtraInfo.bind(this)),
       eventsHelper.addEventListener(session, 'Network.loadingFinished', this._onLoadingFinished.bind(this)),
       eventsHelper.addEventListener(session, 'Network.loadingFailed', this._onLoadingFailed.bind(this, workerFrame)),
-      eventsHelper.addEventListener(session, 'Network.webSocketCreated', e => this._page._frameManager.onWebSocketCreated(e.requestId, e.url)),
-      eventsHelper.addEventListener(session, 'Network.webSocketWillSendHandshakeRequest', e => this._page._frameManager.onWebSocketRequest(e.requestId)),
-      eventsHelper.addEventListener(session, 'Network.webSocketHandshakeResponseReceived', e => this._page._frameManager.onWebSocketResponse(e.requestId, e.response.status, e.response.statusText)),
-      eventsHelper.addEventListener(session, 'Network.webSocketFrameSent', e => e.response.payloadData && this._page._frameManager.onWebSocketFrameSent(e.requestId, e.response.opcode, e.response.payloadData)),
-      eventsHelper.addEventListener(session, 'Network.webSocketFrameReceived', e => e.response.payloadData && this._page._frameManager.webSocketFrameReceived(e.requestId, e.response.opcode, e.response.payloadData)),
-      eventsHelper.addEventListener(session, 'Network.webSocketClosed', e => this._page._frameManager.webSocketClosed(e.requestId)),
-      eventsHelper.addEventListener(session, 'Network.webSocketFrameError', e => this._page._frameManager.webSocketError(e.requestId, e.errorMessage)),
+      eventsHelper.addEventListener(session, 'Network.webSocketCreated', e => this._networkOwner.onWebSocketCreated(e.requestId, e.url)),
+      eventsHelper.addEventListener(session, 'Network.webSocketWillSendHandshakeRequest', e => this._networkOwner.onWebSocketRequest(e.requestId)),
+      eventsHelper.addEventListener(session, 'Network.webSocketHandshakeResponseReceived', e => this._networkOwner.onWebSocketResponse(e.requestId, e.response.status, e.response.statusText)),
+      eventsHelper.addEventListener(session, 'Network.webSocketFrameSent', e => e.response.payloadData && this._networkOwner.onWebSocketFrameSent(e.requestId, e.response.opcode, e.response.payloadData)),
+      eventsHelper.addEventListener(session, 'Network.webSocketFrameReceived', e => e.response.payloadData && this._networkOwner.webSocketFrameReceived(e.requestId, e.response.opcode, e.response.payloadData)),
+      eventsHelper.addEventListener(session, 'Network.webSocketClosed', e => this._networkOwner.webSocketClosed(e.requestId)),
+      eventsHelper.addEventListener(session, 'Network.webSocketFrameError', e => this._networkOwner.webSocketError(e.requestId, e.errorMessage)),
     ];
   }
 
@@ -201,19 +268,19 @@ export class CRNetworkManager {
         redirectedFrom = request;
       }
     }
-    let frame = requestWillBeSentEvent.frameId ? this._page._frameManager.frame(requestWillBeSentEvent.frameId) : workerFrame;
+    let frame = requestWillBeSentEvent.frameId ? this._networkOwner.frame(requestWillBeSentEvent.frameId) : workerFrame;
     // Requests from workers lack frameId, because we receive Network.requestWillBeSent
     // on the worker target. However, we receive Fetch.requestPaused on the page target,
     // and lack workerFrame there. Luckily, Fetch.requestPaused provides a frameId.
     if (!frame && requestPausedEvent && requestPausedEvent.frameId)
-      frame = this._page._frameManager.frame(requestPausedEvent.frameId);
+      frame = this._networkOwner.frame(requestPausedEvent.frameId);
 
     // Check if it's main resource request interception (targetId === main frame id).
-    if (!frame && requestWillBeSentEvent.frameId === (this._page._delegate as CRPage)._targetId) {
+    if (!frame && requestWillBeSentEvent.frameId === (this._networkOwner._delegate as CRPage)._targetId) {
       // Main resource request for the page is being intercepted so the Frame is not created
       // yet. Precreate it here for the purposes of request interception. It will be updated
       // later as soon as the request continues and we receive frame tree from the page.
-      frame = this._page._frameManager.frameAttached(requestWillBeSentEvent.frameId, null);
+      frame = this._networkOwner.frameAttached(requestWillBeSentEvent.frameId, null);
     }
 
     // CORS options request is generated by the network stack. If interception is enabled,
@@ -221,7 +288,7 @@ export class CRNetworkManager {
     //
     // Note: it would be better to match the URL against interception patterns, but
     // that information is only available to the client. Perhaps we can just route to the client?
-    if (requestPausedEvent && requestPausedEvent.request.method === 'OPTIONS' && this._page._needsRequestInterception()) {
+    if (requestPausedEvent && requestPausedEvent.request.method === 'OPTIONS' && this._networkOwner._needsRequestInterception()) {
       const requestHeaders = requestPausedEvent.request.headers;
       const responseHeaders: Protocol.Fetch.HeaderEntry[] = [
         { name: 'Access-Control-Allow-Origin', value: requestHeaders['Origin'] || '*' },
@@ -265,7 +332,7 @@ export class CRNetworkManager {
       redirectedFrom
     });
     this._requestIdToRequest.set(requestWillBeSentEvent.requestId, request);
-    this._page._frameManager.requestStarted(request.request, route || undefined);
+    this._networkOwner.requestStarted(request.request, route || undefined);
   }
 
   _createResponse(request: InterceptableRequest, responsePayload: Protocol.Network.Response): network.Response {
@@ -324,8 +391,8 @@ export class CRNetworkManager {
     this._requestIdToRequest.delete(request._requestId);
     if (request._interceptionId)
       this._attemptedAuthentications.delete(request._interceptionId);
-    this._page._frameManager.requestReceivedResponse(response);
-    this._page._frameManager.reportRequestFinished(request.request, response);
+    this._networkOwner.requestReceivedResponse(response);
+    this._networkOwner.reportRequestFinished(request.request, response);
   }
 
   _onResponseReceivedExtraInfo(event: Protocol.Network.responseReceivedExtraInfoPayload) {
@@ -340,7 +407,7 @@ export class CRNetworkManager {
     if (!request)
       return;
     const response = this._createResponse(request, event.response);
-    this._page._frameManager.requestReceivedResponse(response);
+    this._networkOwner.requestReceivedResponse(response);
   }
 
   _onLoadingFinished(event: Protocol.Network.loadingFinishedPayload) {
@@ -365,7 +432,7 @@ export class CRNetworkManager {
     this._requestIdToRequest.delete(request._requestId);
     if (request._interceptionId)
       this._attemptedAuthentications.delete(request._interceptionId);
-    this._page._frameManager.reportRequestFinished(request.request, response);
+    this._networkOwner.reportRequestFinished(request.request, response);
   }
 
   _onLoadingFailed(workerFrame: frames.Frame | undefined, event: Protocol.Network.loadingFailedPayload) {
@@ -398,7 +465,7 @@ export class CRNetworkManager {
     if (request._interceptionId)
       this._attemptedAuthentications.delete(request._interceptionId);
     request.request._setFailureText(event.errorText);
-    this._page._frameManager.requestFailed(request.request, !!event.canceled);
+    this._networkOwner.requestFailed(request.request, !!event.canceled);
   }
 
   private _maybeAdoptMainRequest(requestId: Protocol.Network.RequestId): InterceptableRequest | undefined {
