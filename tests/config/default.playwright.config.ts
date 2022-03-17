@@ -21,6 +21,9 @@ import type { Config, PlaywrightTestOptions, PlaywrightWorkerOptions } from '@pl
 import * as path from 'path';
 import { TestModeWorkerOptions } from './testModeFixtures';
 import { CoverageWorkerOptions } from './coverageFixtures';
+import { ciInfo } from '@playwright/test-plugins-ci';
+
+ciInfo();
 
 type BrowserName = 'chromium' | 'firefox' | 'webkit';
 

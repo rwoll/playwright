@@ -1,0 +1,7 @@
+{
+  "name": "@playwright/test-plugins-ci",
+  "private": true,
+  "exports": {
+    ".": "./lib/index.js"
+  }
+}
