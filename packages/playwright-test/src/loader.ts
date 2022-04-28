@@ -85,6 +85,8 @@ export class Loader {
     for (const plugin of config.plugins || [])
       plugin.configure?.(config, configDir);
 
+    console.log('metadata', config.metadata);
+
     this._configDir = configDir;
     const packageJsonPath = getPackageJsonPath(configDir);
     const packageJsonDir = packageJsonPath ? path.dirname(packageJsonPath) : undefined;
