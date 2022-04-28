@@ -40,7 +40,7 @@ export const vcs = (options?: VCSPluginOptions): TestPlugin => {
       config.metadata.revision = {
         ...config.metadata?.revision,
         link: links.revision,
-        ...revision
+        ...revision,
       };
       config.metadata.ci = {
         ...config.metadata?.ci,

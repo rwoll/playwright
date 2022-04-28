@@ -24,6 +24,9 @@ import './reportView.css';
 import './theme.css';
 
 export const MetadataView: React.FC<Metadata> = metadata => {
+  if (!metadata.ci?.link && !metadata.revision?.id && !metadata.revision?.author && !metadata.revision?.email && !metadata.revision?.subject && !metadata.revision?.timestamp && !metadata.revision?.link && !metadata.generatedAt)
+    return null;
+
   return (
     <AutoChip header={
       <span>
@@ -31,7 +34,7 @@ export const MetadataView: React.FC<Metadata> = metadata => {
           {metadata.revision?.id.slice(0, 7)}
         </span>}
         {metadata.revision?.subject || 'Commit Metainfo'}
-      </span>} initialExpanded={false}>
+      </span>} initialExpanded={false} testId='metadata-chip'>
       {metadata.revision?.subject &&
         <MetadatViewItem
           testId='revision.subject'
