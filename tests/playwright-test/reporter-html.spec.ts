@@ -704,7 +704,7 @@ test('open tests from required file', async ({ runInlineTest, showReport, page }
   ]);
 });
 
-test('should include metadata', async ({ runInlineTest, showReport, page }) => {
+test.only('should include metadata', async ({ runInlineTest, showReport, page }) => {
   const beforeRunPlaywrightTest = async ({ baseDir }: { baseDir: string }) => {
     const execGit = async (args: string[]) => {
       const { code, stdout, stderr } = await spawnAsync('git', args, { stdio: 'pipe', cwd: baseDir });
@@ -722,26 +722,11 @@ test('should include metadata', async ({ runInlineTest, showReport, page }) => {
 
   const result = await runInlineTest({
     'uncommitted.txt': `uncommitted file`,
-    'globalSetup.ts': `
-      import { FullConfig, GlobalInfo } from '@playwright/test';
-      import * as ci from '@playwright/test/lib/ci';
-
-      async function globalSetup(config: FullConfig, globalInfo: GlobalInfo) {
-        const pluginResults = await Promise.all([
-          ci.generationTimestamp(),
-          ci.gitStatusFromCLI(config.rootDir),
-          ci.githubEnv(),
-        ]);
-
-        await Promise.all(pluginResults.flat().map(attachment => globalInfo.attach(attachment.name, attachment)));
-      }
-
-      export default globalSetup;
-    `,
     'playwright.config.ts': `
+      import { vcs } from '@playwright/test/lib/plugins';
       import path from 'path';
       const config = {
-        globalSetup: path.join(__dirname, './globalSetup'),
+        plugins: [ vcs() ],
       }
 
       export default config;

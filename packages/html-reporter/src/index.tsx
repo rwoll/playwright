@@ -55,13 +55,6 @@ const extractMetadata = (attachments: TestAttachment[]): Metadata | undefined =>
 
     return v;
   };
-  const fieldAsBool = (name: string) => {
-    const v = fieldAsJSON(name);
-    if (v !== undefined && typeof v !== 'boolean')
-      throw new Error(`Invalid value for field '${name}'. Expected type 'boolean', but got ${typeof v}.`);
-
-    return v;
-  };
 
   const out = {
     'generatedAt': fieldAsNumber('generatedAt'),
@@ -71,7 +64,6 @@ const extractMetadata = (attachments: TestAttachment[]): Metadata | undefined =>
     'revision.subject': field('revision.subject'),
     'revision.timestamp': fieldAsNumber('revision.timestamp'),
     'revision.link': field('revision.link'),
-    'revision.localPendingChanges': fieldAsBool('revision.localPendingChanges'),
     'ci.link': field('ci.link'),
   };
 

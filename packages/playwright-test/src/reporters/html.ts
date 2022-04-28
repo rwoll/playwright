@@ -49,6 +49,7 @@ export type Location = {
 };
 
 export type HTMLReport = {
+  metadata: any;
   attachments: TestAttachment[];
   files: TestFileSummary[];
   stats: Stats;
@@ -255,7 +256,7 @@ class HtmlBuilder {
     this._dataZipFile = new yazl.ZipFile();
   }
 
-  async build(testReportAttachments: JsonAttachment[], rawReports: JsonReport[]): Promise<{ ok: boolean, singleTestId: string | undefined }> {
+  async build(metadata: any, testReportAttachments: JsonAttachment[], rawReports: JsonReport[]): Promise<{ ok: boolean, singleTestId: string | undefined }> {
 
     const data = new Map<string, { testFile: TestFile, testFileSummary: TestFileSummary }>();
     for (const projectJson of rawReports) {
@@ -312,6 +313,7 @@ class HtmlBuilder {
     }
     const htmlReport: HTMLReport = {
       attachments: this._serializeAttachments(testReportAttachments),
+      metadata,
       files: [...data.values()].map(e => e.testFileSummary),
       projectNames: rawReports.map(r => r.project.name),
       stats: [...data.values()].reduce((a, e) => addStats(a, e.testFileSummary.stats), emptyStats())

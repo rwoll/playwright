@@ -16,12 +16,16 @@
 
 import path from 'path';
 import type { PlaywrightTestConfig } from '@playwright/test';
+import { vcs } from '@playwright/test/lib/plugins';
 import { config as loadEnv } from 'dotenv';
 loadEnv({ path: path.join(__dirname, '..', '..', '.env') });
 
+
 const config: PlaywrightTestConfig = {
+  plugins: [
+    vcs(),
+  ],
   testIgnore: '**\/fixture-scripts/**',
-  globalSetup: path.join(__dirname, 'globalSetup'),
   timeout: 5 * 60 * 1000,
   retries: 0,
   reporter: process.env.CI ? 'dot' : [['list'], ['html', { open: 'on-failure' }]],
