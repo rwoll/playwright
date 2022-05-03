@@ -5,38 +5,76 @@ title: "Release notes"
 
 <!-- TOC -->
 
+## Version 1.21
+
+### Highlights
+
+- New role selectors that allow selecting elements by their [ARIA role](https://www.w3.org/TR/wai-aria-1.2/#roles), [ARIA attributes](https://www.w3.org/TR/wai-aria-1.2/#aria-attributes) and [accessible name](https://w3c.github.io/accname/#dfn-accessible-name).
+
+  ```js
+  // Click a button with accessible name "log in"
+  await page.click('role=button[name="log in"]')
+  ```
+
+  Read more in [our documentation](./selectors#role-selector).
+- New `scale` option in [`method: Page.screenshot`] for smaller sized screenshots.
+- New `caret` option in [`method: Page.screenshot`] to control text caret. Defaults to `"hide"`.
+
+- New method `expect.poll` to wait for an arbitrary condition:
+
+  ```js
+  // Poll the method until it returns an expected result.
+  await expect.poll(async () => {
+    const response = await page.request.get('https://api.example.com');
+    return response.status();
+  }).toBe(200);
+  ```
+
+  `expect.poll` supports most synchronous matchers, like `.toBe()`, `.toContain()`, etc.
+  Read more in [our documentation](./test-assertions.md#polling).
+
+### Behavior Changes
+
+- ESM support when running TypeScript tests is now enabled by default. The `PLAYWRIGHT_EXPERIMENTAL_TS_ESM` env variable is
+  no longer required.
+- The `mcr.microsoft.com/playwright` docker image no longer contains Python. Please use `mcr.microsoft.com/playwright/python`
+  as a Playwright-ready docker image with pre-installed Python.
+- Playwright now supports large file uploads (100s of MBs) via [`method: Locator.setInputFiles`] API.
+
+### Browser Versions
+
+- Chromium 101.0.4951.26
+- Mozilla Firefox 98.0.2
+- WebKit 15.4
+
+This version was also tested against the following stable channels:
+
+- Google Chrome 100
+- Microsoft Edge 100
+
+
 ## Version 1.20
 
-### Visual Regression Testing
+### Highlights
 
 - New options for methods [`method: Page.screenshot`], [`method: Locator.screenshot`] and [`method: ElementHandle.screenshot`]:
   * Option `animations: "disabled"` rewinds all CSS animations and transitions to a consistent state
   * Option `mask: Locator[]` masks given elements, overlaying them with pink `#FF00FF` boxes.
-- New web-first assertions for screenshots: [`method: PageAssertions.toHaveScreenshot`] and [`method: LocatorAssertions.toHaveScreenshot`]. These methods will re-take screenshot until it matches the saved expectation. When generating a new expectation, the method will re-take screenshots until 2 consecutive screenshots match.
-
-  New methods support both named and anonymous (auto-named) expectations:
+- `expect().toMatchSnapshot()` now supports anonymous snapshots: when snapshot name is missing, Playwright Test will generate one
+  automatically:
 
   ```js
-  // Take a full-page screenshot with a named expectation `fullpage.png`.
-  await expect(page).toHaveScreenshot('fullpage.png', { fullPage: true });
-  // Take a screenshot of an element with anonymous expectation.
-  await expect(page.locator('text=Booking')).toHaveScreenshot();
+  expect('Web is Awesome <3').toMatchSnapshot();
   ```
-
-  Methods support all screenshot options from [`method: Page.screenshot`] and [`method: Locator.screenshot`].
-
-  These methods also support new `maxDiffPixels` and `maxDiffPixelRatio` options for fine-grained screenshot comparison:
+- New `maxDiffPixels` and `maxDiffPixelRatio` options for fine-grained screenshot comparison using `expect().toMatchSnapshot()`:
 
   ```js
-  await expect(page).toHaveScreenshot({
-    fullPage: true, // take a full page screenshot
+  expect(await page.screenshot()).toMatchSnapshot({
     maxDiffPixels: 27, // allow no more than 27 different pixels.
   });
   ```
 
   It is most convenient to specify `maxDiffPixels` or `maxDiffPixelRatio` once in [`property: TestConfig.expect`].
-
-### Other Updates
 
 - Playwright Test now adds [`property: TestConfig.fullyParallel`] mode. By default, Playwright Test parallelizes between files. In fully parallel mode, tests inside a single file are also run in parallel. You can also use `--fully-parallel` command line flag.
 
@@ -55,28 +93,20 @@ title: "Release notes"
     projects: [
       {
         name: 'smoke tests',
-        grep: '@smoke',
+        grep: /@smoke/,
       },
     ],
   };
   ```
 
 - [Trace Viewer](./trace-viewer) now shows [API testing requests](./test-api-testing).
-- `expect().toMatchSnapshot()` now supports anonymous snapshots: when snapshot name is missing, Playwright Test will generate one
-  automatically:
-
-  ```js
-  expect('Web is Awesome <3').toMatchSnapshot();
-  ```
-
 - [`method: Locator.highlight`] visually reveals element(s) for easier debugging.
 
 ### Announcements
 
 - We now ship a designated Python docker image `mcr.microsoft.com/playwright/python`. Please switch over to it if you use
   Python. This is the last release that includes Python inside our javascript `mcr.microsoft.com/playwright` docker image.
-- v1.20 is the last release that ships WebKit for macOS 10.15 Catalina. All future versions will support WebKit for macOS 11 BigSur
-  and up.
+- v1.20 is the last release to receive WebKit update for macOS 10.15 Catalina. Please update MacOS to keep using latest & greatest WebKit!
 
 ### Browser Versions
 
@@ -412,7 +442,7 @@ trace and image artifacts.
 
 ![html reporter](https://user-images.githubusercontent.com/746130/138324311-94e68b39-b51a-4776-a446-f60037a77f32.png)
 
-Read more about [our reporters](./test-reporters/#html-reporter).
+Read more about [our reporters](./test-reporters#html-reporter).
 
 ### 🎭 Playwright Library
 
@@ -480,7 +510,7 @@ Previously it was not possible to get multiple header values of a response. This
 - [Response.allHeaders()](https://playwright.dev/docs/api/class-response#response-all-headers)
 - [Response.headersArray()](https://playwright.dev/docs/api/class-response#response-headers-array)
 - [Response.headerValue(name: string)](https://playwright.dev/docs/api/class-response#response-header-value)
-- [Response.headerValues(name: string)](https://playwright.dev/docs/api/class-response/#response-header-values)
+- [Response.headerValues(name: string)](https://playwright.dev/docs/api/class-response#response-header-values)
 
 #### 🌈 Forced-Colors emulation
 
@@ -588,7 +618,7 @@ Consider the following example:
 await expect(page.locator('.status')).toHaveText('Submitted');
 ```
 
-Playwright Test will be re-testing the node with the selector `.status` until fetched Node has the `"Submitted"` text. It will be re-fetching the node and checking it over and over, until the condition is met or until the timeout is reached. You can either pass this timeout or configure it once via the [`testProject.expect`](./api/class-testproject/#test-project-expect) value in test config.
+Playwright Test will be re-testing the node with the selector `.status` until fetched Node has the `"Submitted"` text. It will be re-fetching the node and checking it over and over, until the condition is met or until the timeout is reached. You can either pass this timeout or configure it once via the [`testProject.expect`](./api/class-testproject#test-project-expect) value in test config.
 
 By default, the timeout for assertions is not set, so it'll wait forever, until the whole test times out.
 
@@ -648,7 +678,7 @@ Step information is exposed in reporters API.
 
 #### 🌎 Launch web server before running tests
 
-To launch a server during the tests, use the [`webServer`](./test-advanced/#launching-a-development-web-server-during-the-tests) option in the configuration file. The server will wait for a given port to be available before running the tests, and the port will be passed over to Playwright as a [`baseURL`](./api/class-fixtures#fixtures-base-url) when creating a context.
+To launch a server during the tests, use the [`webServer`](./test-advanced#launching-a-development-web-server-during-the-tests) option in the configuration file. The server will wait for a given port to be available before running the tests, and the port will be passed over to Playwright as a [`baseURL`](./api/class-fixtures#fixtures-base-url) when creating a context.
 
 ```ts
 // playwright.config.ts
@@ -893,9 +923,6 @@ This version of Playwright was also tested against the following stable channels
 - Playwright now includes [command line interface](./cli.md), former playwright-cli.
   ```bash js
   npx playwright --help
-  ```
-  ```bash python
-  playwright --help
   ```
 - [`method: Page.selectOption`] now waits for the options to be present.
 - New methods to [assert element state](./actionability#assertions) like [`method: Page.isEditable`].

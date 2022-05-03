@@ -255,26 +255,19 @@ with sync_playwright() as p:
 
 ```csharp
 using Microsoft.Playwright;
-using System.Threading.Tasks;
 
-class Program
-{
-    public static async Task Main()
-    {
-        using var playwright = await Playwright.CreateAsync();
-        var chromium = playwright.Chromium;
-        // Make sure to run headed.
-        var browser = await chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+using var playwright = await Playwright.CreateAsync();
+var chromium = playwright.Chromium;
+// Make sure to run headed.
+var browser = await chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
 
-        // Setup context however you like.
-        var context = await browser.NewContextAsync(); // Pass any options
-        await context.RouteAsync('**/*', route => route.ContinueAsync());
+// Setup context however you like.
+var context = await browser.NewContextAsync(); // Pass any options
+await context.RouteAsync('**/*', route => route.ContinueAsync());
 
-        // Pause the page, and start recording manually.
-        var page = await context.NewPageAsync();
-        await page.PauseAsync();
-    }
-}
+// Pause the page, and start recording manually.
+var page = await context.NewPageAsync();
+await page.PauseAsync();
 ```
 
 ## Open pages
@@ -542,7 +535,7 @@ pwsh bin\Debug\netX\playwright.ps1 pdf https://en.wikipedia.org/wiki/PDF wiki.pd
 
 ## Install system dependencies
 
-Ubuntu 18.04 and Ubuntu 20.04 system dependencies can get installed automatically. This is useful for CI environments.
+System dependencies can get installed automatically. This is useful for CI environments.
 
 ```bash js
 # See command help

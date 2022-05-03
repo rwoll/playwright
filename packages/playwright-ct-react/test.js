@@ -32,10 +32,9 @@ const test = baseTest.extend({
     await use(_workerPage);
   },
 
-  mount: async ({ page, baseURL }, use) => {
+  mount: async ({ page, baseURL, viewport }, use) => {
     await use(async (component, options) => {
-      await page.goto(baseURL);
-      const selector = await mount(page, component, options);
+      const selector = await mount(page, component, options, baseURL, viewport);
       return page.locator(selector);
     });
   },

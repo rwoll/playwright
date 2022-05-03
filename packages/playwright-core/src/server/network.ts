@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-import * as frames from './frames';
 import * as pages from './page';
-import * as types from './types';
 import * as contexts from './browserContext';
-import { assert } from '../utils/utils';
-import { ManualPromise } from '../utils/async';
+import type * as frames from './frames';
+import type * as types from './types';
+import type * as channels from '../protocol/channels';
+import { assert } from '../utils';
+import { ManualPromise } from '../utils/manualPromise';
 import { SdkObject } from './instrumentation';
-import { NameValue } from '../common/types';
+import type { NameValue } from '../common/types';
 import { APIRequestContext } from './fetch';
 
 export function filterCookies(cookies: types.NetworkCookie[], urls: string[]): types.NetworkCookie[] {
@@ -53,7 +54,6 @@ const kMaxCookieExpiresDateInSeconds = 253402300799;
 
 export function rewriteCookies(cookies: types.SetNetworkCookieParam[]): types.SetNetworkCookieParam[] {
   return cookies.map(c => {
-    assert(c.name, 'Cookie should have a name');
     assert(c.url || (c.domain && c.path), 'Cookie should have a url or a domain/path pair');
     assert(!(c.url && c.domain), 'Cookie should have either url or domain');
     assert(!(c.url && c.path), 'Cookie should have either url or path');
@@ -259,7 +259,7 @@ export class Route extends SdkObject {
     await this._delegate.abort(errorCode);
   }
 
-  async fulfill(overrides: { status?: number, headers?: types.HeadersArray, body?: string, isBase64?: boolean, useInterceptedResponseBody?: boolean, fetchResponseUid?: string }) {
+  async fulfill(overrides: channels.RouteFulfillParams) {
     this._startHandling();
     let body = overrides.body;
     let isBase64 = overrides.isBase64 || false;
@@ -274,12 +274,32 @@ export class Route extends SdkObject {
         isBase64 = false;
       }
     }
+    const headers = [...(overrides.headers || [])];
+    this._maybeAddCorsHeaders(headers);
     await this._delegate.fulfill({
       status: overrides.status || 200,
-      headers: overrides.headers || [],
+      headers,
       body,
       isBase64,
     });
+  }
+
+  // See https://github.com/microsoft/playwright/issues/12929
+  private _maybeAddCorsHeaders(headers: NameValue[]) {
+    const origin = this._request.headerValue('origin');
+    if (!origin)
+      return;
+    const requestUrl = new URL(this._request.url());
+    if (!requestUrl.protocol.startsWith('http'))
+      return;
+    if (requestUrl.origin === origin.trim())
+      return;
+    const corsHeader = headers.find(({ name }) => name === 'access-control-allow-origin');
+    if (corsHeader)
+      return;
+    headers.push({ name: 'access-control-allow-origin', value: origin });
+    headers.push({ name: 'access-control-allow-credentials', value: 'true' });
+    headers.push({ name: 'vary', value: 'Origin' });
   }
 
   async continue(overrides: types.NormalizedContinueOverrides = {}) {

@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
-import { Size, Point, TimeoutOptions } from '../common/types';
-export { Size, Point, Rect, Quad, URLMatch, TimeoutOptions } from '../common/types';
+import type { Size, Point, TimeoutOptions } from '../common/types';
+export type { Size, Point, Rect, Quad, URLMatch, TimeoutOptions } from '../common/types';
 
 export type StrictOptions = {
   strict?: boolean,
@@ -257,6 +257,7 @@ export type BrowserContextOptions = {
     omitContent?: boolean,
     path: string
   },
+  storageState?: SetStorageState,
   strictSelectors?: boolean,
   proxy?: ProxySettings,
   baseURL?: string,
@@ -368,5 +369,7 @@ export type APIResponse = {
 };
 
 export type AndroidDeviceOptions = {
-  port?: number
+  host?: string,
+  port?: number,
+  omitDriverInstall?: boolean,
 };

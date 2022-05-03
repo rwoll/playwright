@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { Route } from 'playwright-core';
+import type { Route } from 'playwright-core';
 import { test as it, expect } from './pageTest';
 
 it('should intercept @smoke', async ({ page, server }) => {
@@ -516,7 +516,7 @@ it('should not fulfill with redirect status', async ({ page, server, browserName
 it('should support cors with GET', async ({ page, server, browserName }) => {
   await page.goto(server.EMPTY_PAGE);
   await page.route('**/cars*', async (route, request) => {
-    const headers = request.url().endsWith('allow') ? { 'access-control-allow-origin': '*' } : {};
+    const headers = { 'access-control-allow-origin': request.url().endsWith('allow') ? '*' : 'none' };
     await route.fulfill({
       contentType: 'application/json',
       headers,
@@ -544,6 +544,98 @@ it('should support cors with GET', async ({ page, server, browserName }) => {
       expect(error.message).toContain('TypeError');
     if (browserName === 'firefox')
       expect(error.message).toContain('NetworkError');
+  }
+});
+
+it('should add Access-Control-Allow-Origin by default when fulfill', async ({ page, server }) => {
+  await page.goto(server.EMPTY_PAGE);
+  await page.route('**/cars', async route => {
+    await route.fulfill({
+      contentType: 'application/json',
+      status: 200,
+      body: JSON.stringify(['electric', 'gas']),
+    });
+  });
+
+  const [result, response] = await Promise.all([
+    page.evaluate(async () => {
+      const response = await fetch('https://example.com/cars', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors',
+        body: JSON.stringify({ 'number': 1 })
+      });
+      return response.json();
+    }),
+    page.waitForResponse('https://example.com/cars')
+  ]);
+  expect(result).toEqual(['electric', 'gas']);
+  expect(await response.headerValue('Access-Control-Allow-Origin')).toBe(server.PREFIX);
+});
+
+it('should allow null origin for about:blank', async ({ page, server, browserName }) => {
+  await page.route('**/something', async route => {
+    await route.fulfill({
+      contentType: 'text/plain',
+      status: 200,
+      body: 'done',
+    });
+  });
+
+  const [response, text] = await Promise.all([
+    page.waitForResponse(server.CROSS_PROCESS_PREFIX + '/something'),
+    page.evaluate(async url => {
+      const data = await fetch(url, {
+        method: 'GET',
+        headers: { 'X-PINGOTHER': 'pingpong' }
+      });
+      return data.text();
+    }, server.CROSS_PROCESS_PREFIX + '/something')
+  ]);
+  expect(text).toBe('done');
+  expect(await response.headerValue('Access-Control-Allow-Origin')).toBe('null');
+});
+
+it('should respect cors overrides', async ({ page, server, browserName }) => {
+  await page.goto(server.EMPTY_PAGE);
+  server.setRoute('/something', (request, response) => {
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, DELETE',
+        'Access-Control-Allow-Headers': '*',
+        'Cache-Control': 'no-cache'
+      });
+      response.end();
+      return;
+    }
+    response.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
+    response.end('NOT FOUND');
+  });
+  // Fetch request should fail when CORS header doesn't include the origin.
+  {
+    await page.route('**/something', async route => {
+      await route.fulfill({
+        contentType: 'text/plain',
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': 'http://non-existent' },
+        body: 'done',
+      });
+    });
+
+    const error = await page.evaluate(async url => {
+      const data = await fetch(url, {
+        method: 'GET',
+        headers: { 'X-PINGOTHER': 'pingpong' }
+      });
+      return data.text();
+    }, server.CROSS_PROCESS_PREFIX + '/something').catch(e => e);
+    if (browserName === 'chromium')
+      expect(error.message).toContain('Failed to fetch');
+    else if (browserName === 'webkit')
+      expect(error.message).toContain('Load failed');
+    else if (browserName === 'firefox')
+      expect(error.message).toContain('NetworkError when attempting to fetch resource.');
   }
 });
 

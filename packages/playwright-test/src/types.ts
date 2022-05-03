@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import type { Fixtures, TestError } from '../types/test';
+import type { Fixtures, TestError, Project, TestPlugin } from '../types/test';
 import type { Location } from '../types/testReporter';
+import type { FullConfig as FullConfigPublic, FullProject as FullProjectPublic } from './types';
 export * from '../types/test';
-export { Location } from '../types/testReporter';
+export type { Location } from '../types/testReporter';
 
 export type FixturesWithLocation = {
   fixtures: Fixtures;
@@ -26,10 +27,39 @@ export type FixturesWithLocation = {
 export type Annotation = { type: string, description?: string };
 
 export interface TestStepInternal {
-  complete(error?: Error | TestError): void;
+  complete(result: { error?: Error | TestError }): void;
   title: string;
   category: string;
   canHaveChildren: boolean;
   forceNoParent: boolean;
   location?: Location;
+  refinedTitle?: string;
+}
+
+/**
+ * FullConfigInternal allows the plumbing of configuration details throughout the Test Runner without
+ * increasing the surface area of the public API type called FullConfig.
+ */
+export interface FullConfigInternal extends FullConfigPublic {
+  /**
+   * Location for GlobalInfo scoped data. This my differ from the projec-level outputDir
+   * since GlobalInfo (and this config), only respect top-level configurations.
+   */
+  _globalOutputDir: string;
+  _configDir: string;
+  _testGroupsCount: number;
+  _plugins: TestPlugin[];
+
+  // Overrides the public field.
+  projects: FullProjectInternal[];
+}
+
+/**
+ * FullProjectInternal allows the plumbing of configuration details throughout the Test Runner without
+ * increasing the surface area of the public API type called FullProject.
+ */
+export interface FullProjectInternal extends FullProjectPublic {
+  _fullyParallel: boolean;
+  _expect: Project['expect'];
+  _screenshotsDir: string;
 }

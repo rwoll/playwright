@@ -14,16 +14,20 @@
  * limitations under the License.
  */
 
-import { SelectorEngine, SelectorRoot } from './selectorEngine';
+import type { SelectorEngine, SelectorRoot } from './selectorEngine';
 import { XPathEngine } from './xpathSelectorEngine';
 import { ReactEngine } from './reactSelectorEngine';
 import { VueEngine } from './vueSelectorEngine';
-import { allEngineNames, ParsedSelector, ParsedSelectorPart, parseSelector, stringifySelector } from '../common/selectorParser';
-import { SelectorEvaluatorImpl, isVisible, parentElementOrShadowHost, elementMatchesText, TextMatcher, createRegexTextMatcher, createStrictTextMatcher, createLaxTextMatcher } from './selectorEvaluator';
-import { CSSComplexSelectorList } from '../common/cssParser';
+import { RoleEngine } from './roleSelectorEngine';
+import type { ParsedSelector, ParsedSelectorPart } from '../isomorphic/selectorParser';
+import { allEngineNames, parseSelector, stringifySelector } from '../isomorphic/selectorParser';
+import type { TextMatcher } from './selectorEvaluator';
+import { SelectorEvaluatorImpl, isVisible, parentElementOrShadowHost, elementMatchesText, createRegexTextMatcher, createStrictTextMatcher, createLaxTextMatcher } from './selectorEvaluator';
+import type { CSSComplexSelectorList } from '../isomorphic/cssParser';
 import { generateSelector } from './selectorGenerator';
 import type * as channels from '../../protocol/channels';
 import { Highlight } from './highlight';
+import { getAriaDisabled, getAriaRole, getElementAccessibleName } from './roleUtils';
 
 type Predicate<T> = (progress: InjectedScriptProgress) => T | symbol;
 
@@ -59,11 +63,6 @@ export interface SelectorEngineV2 {
   queryAll(root: SelectorRoot, body: any): Element[];
 }
 
-export type ElementMatch = {
-  element: Element;
-  capture: Element | undefined;
-};
-
 export type HitTargetInterceptionResult = {
   stop: () => 'done' | { hitTargetDescription: string };
 };
@@ -78,7 +77,7 @@ export class InjectedScript {
   private _highlight: Highlight | undefined;
   readonly isUnderTest: boolean;
 
-  constructor(isUnderTest: boolean, stableRafCount: number, browserName: string, customEngines: { name: string, engine: SelectorEngine}[]) {
+  constructor(isUnderTest: boolean, stableRafCount: number, browserName: string, experimentalFeaturesEnabled: boolean, customEngines: { name: string, engine: SelectorEngine}[]) {
     this.isUnderTest = isUnderTest;
     this._evaluator = new SelectorEvaluatorImpl(new Map());
 
@@ -87,6 +86,7 @@ export class InjectedScript {
     this._engines.set('xpath:light', XPathEngine);
     this._engines.set('_react', ReactEngine);
     this._engines.set('_vue', VueEngine);
+    this._engines.set('role', RoleEngine);
     this._engines.set('text', this._createTextEngine(true));
     this._engines.set('text:light', this._createTextEngine(false));
     this._engines.set('id', this._createAttributeEngine('id', true));
@@ -99,7 +99,7 @@ export class InjectedScript {
     this._engines.set('data-test:light', this._createAttributeEngine('data-test', false));
     this._engines.set('css', this._createCSSEngine());
     this._engines.set('nth', { queryAll: () => [] });
-    this._engines.set('visible', { queryAll: () => [] });
+    this._engines.set('visible', this._createVisibleEngine());
     this._engines.set('control', this._createControlEngine());
     this._engines.set('has', this._createHasEngine());
 
@@ -111,10 +111,13 @@ export class InjectedScript {
 
     this._setupGlobalListenersRemovalDetection();
     this._setupHitTargetInterceptors();
+
+    if (isUnderTest)
+      (window as any).__injectedScript = this;
   }
 
   eval(expression: string): any {
-    return global.eval(expression);
+    return globalThis.eval(expression);
   }
 
   parseSelector(selector: string): ParsedSelector {
@@ -131,93 +134,70 @@ export class InjectedScript {
   }
 
   querySelector(selector: ParsedSelector, root: Node, strict: boolean): Element | undefined {
-    if (!(root as any)['querySelector'])
-      throw this.createStacklessError('Node is not queryable.');
-    this._evaluator.begin();
-    try {
-      const result = this._querySelectorRecursively([{ element: root as Element, capture: undefined }], selector, 0, new Map());
-      if (strict && result.length > 1)
-        throw this.strictModeViolationError(selector, result.map(r => r.element));
-      return result[0]?.capture || result[0]?.element;
-    } finally {
-      this._evaluator.end();
-    }
+    const result = this.querySelectorAll(selector, root);
+    if (strict && result.length > 1)
+      throw this.strictModeViolationError(selector, result);
+    return result[0];
   }
 
-  private _querySelectorRecursively(roots: ElementMatch[], selector: ParsedSelector, index: number, queryCache: Map<Element, Element[][]>): ElementMatch[] {
-    if (index === selector.parts.length)
-      return roots;
-
-    const part = selector.parts[index];
-    if (part.name === 'nth') {
-      let filtered: ElementMatch[] = [];
-      if (part.body === '0') {
-        filtered = roots.slice(0, 1);
-      } else if (part.body === '-1') {
-        if (roots.length)
-          filtered = roots.slice(roots.length - 1);
-      } else {
-        if (typeof selector.capture === 'number')
-          throw this.createStacklessError(`Can't query n-th element in a request with the capture.`);
-        const nth = +part.body;
-        const set = new Set<Element>();
-        for (const root of roots) {
-          set.add(root.element);
-          if (nth + 1 === set.size)
-            filtered = [root];
-        }
-      }
-      return this._querySelectorRecursively(filtered, selector, index + 1, queryCache);
-    }
-
-    if (part.name === 'visible') {
-      const visible = Boolean(part.body);
-      const filtered = roots.filter(match => visible === isVisible(match.element));
-      return this._querySelectorRecursively(filtered, selector, index + 1, queryCache);
-    }
-
-    const result: ElementMatch[] = [];
-    for (const root of roots) {
-      const capture = index - 1 === selector.capture ? root.element : root.capture;
-
-      // Do not query engine twice for the same element.
-      let queryResults = queryCache.get(root.element);
-      if (!queryResults) {
-        queryResults = [];
-        queryCache.set(root.element, queryResults);
-      }
-      let all = queryResults[index];
-      if (!all) {
-        all = this._queryEngineAll(part, root.element);
-        queryResults[index] = all;
-      }
-
-      for (const element of all) {
-        if (!('nodeName' in element))
-          throw this.createStacklessError(`Expected a Node but got ${Object.prototype.toString.call(element)}`);
-        result.push({ element, capture });
-      }
-    }
-    return this._querySelectorRecursively(result, selector, index + 1, queryCache);
+  private _queryNth(roots: Set<Element>, part: ParsedSelectorPart): Set<Element> {
+    const list = [...roots];
+    let nth = +part.body;
+    if (nth === -1)
+      nth = list.length - 1;
+    return new Set<Element>(list.slice(nth, nth + 1));
   }
 
   querySelectorAll(selector: ParsedSelector, root: Node): Element[] {
+    if (selector.capture !== undefined) {
+      if (selector.parts.some(part => part.name === 'nth'))
+        throw this.createStacklessError(`Can't query n-th element in a request with the capture.`);
+      const withHas: ParsedSelector = { parts: selector.parts.slice(0, selector.capture + 1) };
+      if (selector.capture < selector.parts.length - 1) {
+        const body = { parts: selector.parts.slice(selector.capture + 1) };
+        const has: ParsedSelectorPart = { name: 'has', body, source: stringifySelector(body) };
+        withHas.parts.push(has);
+      }
+      return this.querySelectorAll(withHas, root);
+    }
+
     if (!(root as any)['querySelectorAll'])
       throw this.createStacklessError('Node is not queryable.');
+
+    if (selector.capture !== undefined) {
+      // We should have handled the capture above.
+      throw this.createStacklessError('Internal error: there should not be a capture in the selector.');
+    }
+
     this._evaluator.begin();
     try {
-      const result = this._querySelectorRecursively([{ element: root as Element, capture: undefined }], selector, 0, new Map());
-      const set = new Set<Element>();
-      for (const r of result)
-        set.add(r.capture || r.element);
-      return [...set];
+      let roots = new Set<Element>([root as Element]);
+      for (const part of selector.parts) {
+        if (part.name === 'nth') {
+          roots = this._queryNth(roots, part);
+        } else {
+          const next = new Set<Element>();
+          for (const root of roots) {
+            const all = this._queryEngineAll(part, root);
+            for (const one of all)
+              next.add(one);
+          }
+          roots = next;
+        }
+      }
+      return [...roots];
     } finally {
       this._evaluator.end();
     }
   }
 
   private _queryEngineAll(part: ParsedSelectorPart, root: SelectorRoot): Element[] {
-    return this._engines.get(part.name)!.queryAll(root, part.body);
+    const result = this._engines.get(part.name)!.queryAll(root, part.body);
+    for (const element of result) {
+      if (!('nodeName' in element))
+        throw this.createStacklessError(`Expected a Node but got ${Object.prototype.toString.call(element)}`);
+    }
+    return result;
   }
 
   private _createAttributeEngine(attribute: string, shadow: boolean): SelectorEngine {
@@ -295,11 +275,21 @@ export class InjectedScript {
     return { queryAll };
   }
 
+  private _createVisibleEngine(): SelectorEngineV2 {
+    const queryAll = (root: SelectorRoot, body: string) => {
+      if (root.nodeType !== 1 /* Node.ELEMENT_NODE */)
+        return [];
+      return isVisible(root as Element) === Boolean(body) ? [root as Element] : [];
+    };
+    return { queryAll };
+  }
+
   extend(source: string, params: any): any {
-    const constrFunction = global.eval(`
+    const constrFunction = globalThis.eval(`
     (() => {
+      const module = {};
       ${source}
-      return pwExport;
+      return module.exports;
     })()`);
     return new constrFunction(this, params);
   }
@@ -511,7 +501,7 @@ export class InjectedScript {
     if (state === 'hidden')
       return !this.isVisible(element);
 
-    const disabled = isElementDisabled(element);
+    const disabled = getAriaDisabled(element);
     if (state === 'disabled')
       return disabled;
     if (state === 'enabled')
@@ -653,7 +643,14 @@ export class InjectedScript {
       return 'error:notconnected';
     if (node.nodeType !== Node.ELEMENT_NODE)
       throw this.createStacklessError('Node is not an element');
-    const wasFocused = (node.getRootNode() as (Document | ShadowRoot)).activeElement === node && node.ownerDocument && node.ownerDocument.hasFocus();
+
+    const activeElement = (node.getRootNode() as (Document | ShadowRoot)).activeElement;
+    const wasFocused = activeElement === node && node.ownerDocument && node.ownerDocument.hasFocus();
+    if (!wasFocused && activeElement && (activeElement as HTMLElement | SVGElement).blur) {
+      // Workaround the Firefox bug where focusing the element does not switch current
+      // contenteditable to the new element. However, blurring the previous one helps.
+      (activeElement as HTMLElement | SVGElement).blur();
+    }
     (node as HTMLElement | SVGElement).focus();
 
     if (resetSelectionIfNotFocused && !wasFocused && node.nodeName.toLowerCase() === 'input') {
@@ -804,7 +801,7 @@ export class InjectedScript {
     while (container) {
       // elementFromPoint works incorrectly in Chromium (http://crbug.com/1188919),
       // so we use elementsFromPoint instead.
-      const elements = (container as Document).elementsFromPoint(x, y);
+      const elements: Element[] = container.elementsFromPoint(x, y);
       const innerElement = elements[0] as Element | undefined;
       if (!innerElement || element === innerElement)
         break;
@@ -1063,6 +1060,15 @@ export class InjectedScript {
     }
     throw this.createStacklessError('Unknown expect matcher: ' + expression);
   }
+
+  getElementAccessibleName(element: Element, includeHidden?: boolean): string {
+    const hiddenCache = new Map<Element, boolean>();
+    return getElementAccessibleName(element, !!includeHidden, hiddenCache);
+  }
+
+  getAriaRole(element: Element) {
+    return getAriaRole(element);
+  }
 }
 
 const autoClosingTags = new Set(['AREA', 'BASE', 'BR', 'COL', 'COMMAND', 'EMBED', 'HR', 'IMG', 'INPUT', 'KEYGEN', 'LINK', 'MENUITEM', 'META', 'PARAM', 'SOURCE', 'TRACK', 'WBR']);
@@ -1238,35 +1244,4 @@ function deepEquals(a: any, b: any): boolean {
   return false;
 }
 
-function isElementDisabled(element: Element): boolean {
-  const isRealFormControl = ['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'OPTGROUP'].includes(element.nodeName);
-  if (isRealFormControl && element.hasAttribute('disabled'))
-    return true;
-  if (isRealFormControl && hasDisabledFieldSet(element))
-    return true;
-  if (hasAriaDisabled(element))
-    return true;
-  return false;
-}
-
-function hasDisabledFieldSet(element: Element|null): boolean {
-  if (!element)
-    return false;
-  if (element.tagName === 'FIELDSET' && element.hasAttribute('disabled'))
-    return true;
-  // fieldset does not work across shadow boundaries
-  return hasDisabledFieldSet(element.parentElement);
-}
-function hasAriaDisabled(element: Element|undefined): boolean {
-  if (!element)
-    return false;
-  const attribute = (element.getAttribute('aria-disabled') || '').toLowerCase();
-  if (attribute === 'true')
-    return true;
-  if (attribute === 'false')
-    return false;
-  return hasAriaDisabled(parentElementOrShadowHost(element));
-}
-
-
-export default InjectedScript;
+module.exports = InjectedScript;

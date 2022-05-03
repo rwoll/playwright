@@ -313,12 +313,17 @@ CommonScreenshotOptions:
   type: mixin
   properties:
     omitBackground: boolean?
+    caret:
+      type: enum?
+      literals:
+      - hide
+      - initial
     animations:
       type: enum?
       literals:
       - disabled
       - allow
-    size:
+    scale:
       type: enum?
       literals:
       - css
@@ -756,6 +761,8 @@ BrowserContext:
       parameters:
         source: string
 
+    removeInitScripts:
+
     clearCookies:
 
     clearPermissions:
@@ -776,6 +783,8 @@ BrowserContext:
       parameters:
         name: string
         needsHandle: boolean?
+
+    removeExposedBindings:
 
     grantPermissions:
       parameters:
@@ -861,6 +870,12 @@ BrowserContext:
     harExport:
       returns:
         artifact: Artifact
+
+    createTempFile:
+      parameters:
+        name: string
+      returns:
+        writableStream: WritableStream
 
   events:
 
@@ -948,6 +963,8 @@ Page:
       parameters:
         source: string
 
+    removeInitScripts:
+
     close:
       parameters:
         runBeforeUnload: boolean?
@@ -988,6 +1005,8 @@ Page:
       parameters:
         name: string
         needsHandle: boolean?
+
+    removeExposedBindings:
 
     goBack:
       parameters:
@@ -1747,6 +1766,24 @@ Frame:
         snapshot: true
         pausesBeforeInput: true
 
+    # This method should be used if one of the files is large (>50Mb).
+    setInputFilePaths:
+      parameters:
+        selector: string
+        strict: boolean?
+        # Only one of localPaths and streams should be present.
+        localPaths:
+          type: array?
+          items: string
+        streams:
+          type: array?
+          items: WritableStream
+        timeout: number?
+        noWaitAfter: boolean?
+      tracing:
+        snapshot: true
+        pausesBeforeInput: true
+
     tap:
       parameters:
         selector: string
@@ -2272,6 +2309,22 @@ ElementHandle:
         snapshot: true
         pausesBeforeInput: true
 
+    # This method should be used if one of the files is large (>50Mb).
+    setInputFilePaths:
+      parameters:
+        # Only one of localPaths and streams should be present.
+        localPaths:
+          type: array?
+          items: string
+        streams:
+          type: array?
+          items: WritableStream
+        timeout: number?
+        noWaitAfter: boolean?
+      tracing:
+        snapshot: true
+        pausesBeforeInput: true
+
     tap:
       parameters:
         force: boolean?
@@ -2658,6 +2711,18 @@ Stream:
     close:
 
 
+WritableStream:
+  type: interface
+
+  commands:
+
+    write:
+      parameters:
+        binary: binary
+
+    close:
+
+
 CDPSession:
   type: interface
 
@@ -2787,7 +2852,9 @@ Android:
 
     devices:
       parameters:
+        host: string?
         port: number?
+        omitDriverInstall: boolean?
       returns:
         devices:
           type: array
@@ -2992,7 +3059,7 @@ AndroidDevice:
 
     connectToWebView:
       parameters:
-        pid: number
+        socketName: string
       returns:
         context: BrowserContext
 
@@ -3005,7 +3072,7 @@ AndroidDevice:
 
     webViewRemoved:
       parameters:
-        pid: number
+        socketName: string
 
 
 AndroidWebView:
@@ -3013,6 +3080,7 @@ AndroidWebView:
   properties:
     pid: number
     pkg: string
+    socketName: string
 
 
 AndroidSelector:

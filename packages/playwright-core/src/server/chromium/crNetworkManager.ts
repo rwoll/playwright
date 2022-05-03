@@ -15,18 +15,19 @@
  * limitations under the License.
  */
 
-import { CRSession } from './crConnection';
-import { Page } from '../page';
+import type { CRSession } from './crConnection';
+import type { Page } from '../page';
 import { helper } from '../helper';
-import { eventsHelper, RegisteredListener } from '../../utils/eventsHelper';
-import { Protocol } from './protocol';
+import type { RegisteredListener } from '../../utils/eventsHelper';
+import { eventsHelper } from '../../utils/eventsHelper';
+import type { Protocol } from './protocol';
 import * as network from '../network';
 import * as contexts from '../browserContext';
 import * as frames from '../frames';
 import * as types from '../types';
-import { CRPage } from './crPage';
-import { assert, headersObjectToArray } from '../../utils/utils';
 import { CRServiceWorker } from './crServiceWorker';
+import type { CRPage } from './crPage';
+import { assert, headersObjectToArray } from '../../utils';
 
 export class CRNetworkManager {
   private _client: CRSession;

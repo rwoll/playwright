@@ -6,6 +6,8 @@ trap "cd $(pwd -P)" EXIT
 cd "$(dirname "$0")"
 SCRIPT_PATH=$(pwd -P)
 
+source "${SCRIPT_PATH}/utils.sh"
+
 REMOTE_BROWSER_UPSTREAM="browser_upstream"
 BUILD_BRANCH="playwright-build"
 
@@ -27,20 +29,31 @@ if [[ $# == 0 ]]; then
   exit 1
 fi
 
+function maybe_cmd {
+  if is_win; then
+    local args="$@"
+    /c/Windows/System32/cmd.exe "/c $args"
+  else
+    $@
+  fi
+}
+
 function prepare_chromium_checkout {
   cd "${SCRIPT_PATH}"
 
+  if [[ $1 == "chromium" ]]; then
+    source "${SCRIPT_PATH}/chromium/UPSTREAM_CONFIG.sh"
+  elif [[ "$1" == "chromium-tot" ]]; then
+    source "${SCRIPT_PATH}/chromium-tip-of-tree/UPSTREAM_CONFIG.sh"
+  else
+    echo "ERROR: unknown type of checkout to prepare - $1"
+    exit 1
+  fi
   source "${SCRIPT_PATH}/chromium/ensure_depot_tools.sh"
 
   if [[ -z "${CR_CHECKOUT_PATH}" ]]; then
     CR_CHECKOUT_PATH="$HOME/chromium"
   fi
-
-  # Get chromium SHA from the build revision.
-  # This will get us the last redirect URL from the crrev.com service.
-  CRREV=$(head -1 ./chromium/BUILD_NUMBER)
-  REVISION_URL=$(curl -ILs -o /dev/null -w %{url_effective} "https://crrev.com/${CRREV}")
-  CRSHA="${REVISION_URL##*/}"
 
   # Update Chromium checkout.
   #
@@ -49,12 +62,12 @@ function prepare_chromium_checkout {
     rm -rf "${CR_CHECKOUT_PATH}"
     mkdir -p "${CR_CHECKOUT_PATH}"
     cd "${CR_CHECKOUT_PATH}"
-    fetch --nohooks chromium
+    maybe_cmd fetch --nohooks chromium
     cd src
-    if [[ $(uname) == "Linux" ]]; then
+    if is_linux; then
       ./build/install-build-deps.sh
     fi
-    gclient runhooks
+    maybe_cmd gclient runhooks
   fi
   if [[ ! -d "${CR_CHECKOUT_PATH}/src" ]]; then
     echo "ERROR: CR_CHECKOUT_PATH does not have src/ subfolder; is this a chromium checkout?"
@@ -62,10 +75,10 @@ function prepare_chromium_checkout {
   fi
 
   cd "${CR_CHECKOUT_PATH}/src"
-  git checkout main
-  git pull origin main
-  git checkout "${CRSHA}"
-  gclient sync -D
+  maybe_cmd gclient sync --with_branch_heads
+  git fetch origin
+  git checkout "${BRANCH_COMMIT}"
+  maybe_cmd gclient sync -D --with_branch_heads
 }
 
 # FRIENDLY_CHECKOUT_PATH is used only for logging.
@@ -76,7 +89,10 @@ BUILD_NUMBER=""
 WEBKIT_EXTRA_FOLDER_PATH=""
 FIREFOX_EXTRA_FOLDER_PATH=""
 if [[ ("$1" == "chromium") || ("$1" == "chromium/") || ("$1" == "cr") ]]; then
-  prepare_chromium_checkout
+  prepare_chromium_checkout chromium
+  exit 0
+elif [[ ("$1" == "chromium-tip-of-tree") || ("$1" == "chromium-tot") || ("$1" == "cr-tot") ]]; then
+  prepare_chromium_checkout chromium-tot
   exit 0
 elif [[ ("$1" == "ffmpeg") || ("$1" == "ffmpeg/") ]]; then
   echo "FYI: ffmpeg checkout is not supported. Use '//browser_patches/ffmpeg/build.sh' instead"

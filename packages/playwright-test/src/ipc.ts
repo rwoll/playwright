@@ -15,13 +15,16 @@
  */
 
 import type { TestError } from '../types/testReporter';
-import type { Config, TestStatus } from './types';
+import type { ConfigCLIOverrides } from './runner';
+import type { FullConfigInternal, TestStatus } from './types';
 
 export type SerializedLoaderData = {
-  defaultConfig: Config;
-  overrides: Config;
-  configFile: { file: string } | { rootDir: string };
+  config: FullConfigInternal;
+  configFile: string | undefined;
+  configDir: string;
+  overridesForLegacyConfigMode?: ConfigCLIOverrides;
 };
+
 export type WorkerInitParams = {
   workerIndex: number;
   parallelIndex: number;
@@ -60,6 +63,7 @@ export type StepBeginPayload = {
 export type StepEndPayload = {
   testId: string;
   stepId: string;
+  refinedTitle?: string;
   wallTime: number;  // milliseconds since unix epoch
   error?: TestError;
 };
@@ -77,6 +81,7 @@ export type RunPayload = {
 export type DonePayload = {
   fatalErrors: TestError[];
   skipTestsDueToSetupFailure: string[];  // test ids
+  fatalUnknownTestIds?: string[];
 };
 
 export type TestOutputPayload = {

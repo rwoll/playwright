@@ -17,11 +17,11 @@
 import child_process from 'child_process';
 import path from 'path';
 import { EventEmitter } from 'events';
-import { RunPayload, TestBeginPayload, TestEndPayload, DonePayload, TestOutputPayload, WorkerInitParams, StepBeginPayload, StepEndPayload, SerializedLoaderData, TeardownErrorsPayload } from './ipc';
+import type { RunPayload, TestBeginPayload, TestEndPayload, DonePayload, TestOutputPayload, WorkerInitParams, StepBeginPayload, StepEndPayload, SerializedLoaderData, TeardownErrorsPayload } from './ipc';
 import type { TestResult, Reporter, TestStep, TestError } from '../types/testReporter';
-import { Suite, TestCase } from './test';
-import { Loader } from './loader';
-import { ManualPromise } from 'playwright-core/lib/utils/async';
+import type { Suite, TestCase } from './test';
+import type { Loader } from './loader';
+import { ManualPromise } from 'playwright-core/lib/utils/manualPromise';
 
 export type TestGroup = {
   workerHash: string;
@@ -43,7 +43,7 @@ type TestData = {
 export class Dispatcher {
   private _workerSlots: { busy: boolean, worker?: Worker }[] = [];
   private _queue: TestGroup[] = [];
-  private _queueHashCount = new Map<string, number>();
+  private _queuedOrRunningHashCount = new Map<string, number>();
   private _finished = new ManualPromise<void>();
   private _isStopped = false;
 
@@ -58,7 +58,7 @@ export class Dispatcher {
     this._reporter = reporter;
     this._queue = testGroups;
     for (const group of testGroups) {
-      this._queueHashCount.set(group.workerHash, 1 + (this._queueHashCount.get(group.workerHash) || 0));
+      this._queuedOrRunningHashCount.set(group.workerHash, 1 + (this._queuedOrRunningHashCount.get(group.workerHash) || 0));
       for (const test of group.tests)
         this._testById.set(test._id, { test, resultByWorkerIndex: new Map() });
     }
@@ -80,7 +80,6 @@ export class Dispatcher {
 
     // 3. Claim both the job and the worker, run the job and release the worker.
     this._queue.shift();
-    this._queueHashCount.set(job.workerHash, this._queueHashCount.get(job.workerHash)! - 1);
     this._workerSlots[index].busy = true;
     await this._startJobInWorker(index, job);
     this._workerSlots[index].busy = false;
@@ -143,7 +142,7 @@ export class Dispatcher {
       if (slot.worker && !slot.worker.didSendStop() && slot.worker.hash() === worker.hash())
         workersWithSameHash++;
     }
-    return workersWithSameHash > this._queueHashCount.get(worker.hash())!;
+    return workersWithSameHash > this._queuedOrRunningHashCount.get(worker.hash())!;
   }
 
   async run() {
@@ -239,7 +238,6 @@ export class Dispatcher {
         duration: -1,
         steps: [],
         location: params.location,
-        data: {},
       };
       steps.set(params.stepId, step);
       (parentStep || result).steps.push(step);
@@ -262,6 +260,8 @@ export class Dispatcher {
         this._reporter.onStdErr?.('Internal error: step end without step begin: ' + params.stepId, data.test, result);
         return;
       }
+      if (params.refinedTitle)
+        step.title = params.refinedTitle;
       step.duration = params.wallTime - step.startTime.getTime();
       if (params.error)
         step.error = params.error;
@@ -272,13 +272,14 @@ export class Dispatcher {
     worker.on('stepEnd', onStepEnd);
 
     const onDone = (params: DonePayload) => {
+      this._queuedOrRunningHashCount.set(worker.hash(), this._queuedOrRunningHashCount.get(worker.hash())! - 1);
       let remaining = [...remainingByTestId.values()];
 
       // We won't file remaining if:
       // - there are no remaining
       // - we are here not because something failed
       // - no unrecoverable worker error
-      if (!remaining.length && !failedTestIds.size && !params.fatalErrors.length && !params.skipTestsDueToSetupFailure.length) {
+      if (!remaining.length && !failedTestIds.size && !params.fatalErrors.length && !params.skipTestsDueToSetupFailure.length && !params.fatalUnknownTestIds) {
         if (this._isWorkerRedundant(worker))
           worker.stop();
         doneWithJob();
@@ -321,6 +322,13 @@ export class Dispatcher {
         }
       };
 
+      if (params.fatalUnknownTestIds) {
+        const titles = params.fatalUnknownTestIds.map(testId => {
+          const test = this._testById.get(testId)!.test;
+          return test.titlePath().slice(1).join(' > ');
+        });
+        massSkipTestsFromRemaining(new Set(params.fatalUnknownTestIds), [{ message: `Unknown test(s) in worker:\n${titles.join('\n')}` }]);
+      }
       if (params.fatalErrors.length) {
         // In case of fatal errors, report first remaining test as failing with these errors,
         // and all others as skipped.
@@ -378,7 +386,7 @@ export class Dispatcher {
 
       if (remaining.length) {
         this._queue.unshift({ ...testGroup, tests: remaining });
-        this._queueHashCount.set(testGroup.workerHash, this._queueHashCount.get(testGroup.workerHash)! + 1);
+        this._queuedOrRunningHashCount.set(testGroup.workerHash, this._queuedOrRunningHashCount.get(testGroup.workerHash)! + 1);
         // Perhaps we can immediately start the new job if there is a worker available?
         this._scheduleJob();
       }
@@ -464,6 +472,7 @@ class Worker extends EventEmitter {
   private _didSendStop = false;
   private _didFail = false;
   private didExit = false;
+  private _ready: Promise<void>;
 
   constructor(hash: string, parallelIndex: number) {
     super();
@@ -492,9 +501,15 @@ class Worker extends EventEmitter {
       const { method, params } = message;
       this.emit(method, params);
     });
+
+    this._ready = new Promise((resolve, reject) => {
+      this.process.once('exit', () => reject(new Error('worker exited before it became ready')));
+      this.once('ready', () => resolve());
+    });
   }
 
   async init(testGroup: TestGroup, loaderData: SerializedLoaderData) {
+    await this._ready;
     const params: WorkerInitParams = {
       workerIndex: this.workerIndex,
       parallelIndex: this.parallelIndex,
@@ -503,7 +518,6 @@ class Worker extends EventEmitter {
       loader: loaderData,
     };
     this.send({ method: 'init', params });
-    await new Promise(f => this.process.once('message', f));  // Ready ack
   }
 
   run(testGroup: TestGroup) {

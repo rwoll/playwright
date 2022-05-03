@@ -15,7 +15,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { createGuid } from '../utils/utils';
+import { createGuid } from '../utils';
 import type { APIRequestContext } from './fetch';
 import type { Browser } from './browser';
 import type { BrowserContext } from './browserContext';
@@ -25,7 +25,7 @@ import type { Frame } from './frames';
 import type { Page } from './page';
 
 export type Attribution = {
-  isInternal: boolean,
+  isInternalPlaywright: boolean,
   browserType?: BrowserType;
   browser?: Browser;
   context?: BrowserContext | APIRequestContext;
@@ -33,8 +33,8 @@ export type Attribution = {
   frame?: Frame;
 };
 
-import { CallMetadata } from '../protocol/callMetadata';
-export { CallMetadata } from '../protocol/callMetadata';
+import type { CallMetadata } from '../protocol/callMetadata';
+export type { CallMetadata } from '../protocol/callMetadata';
 
 export class SdkObject extends EventEmitter {
   guid: string;
@@ -92,7 +92,7 @@ export function createInstrumentation(): Instrumentation {
   });
 }
 
-export function internalCallMetadata(): CallMetadata {
+export function serverSideCallMetadata(): CallMetadata {
   return {
     id: '',
     wallTime: 0,
@@ -102,6 +102,7 @@ export function internalCallMetadata(): CallMetadata {
     method: '',
     params: {},
     log: [],
-    snapshots: []
+    snapshots: [],
+    isServerSide: true,
   };
 }

@@ -63,20 +63,13 @@ with sync_playwright() as playwright:
 
 ```csharp
 using Microsoft.Playwright;
-using System.Threading.Tasks;
 
-class Program
-{
-    public static async Task Main()
-    {
-        using var playwright = await Playwright.CreateAsync();
-        var firefox = playwright.Firefox;
-        var browser = await firefox.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
-        var page = await browser.NewPageAsync();
-        await page.GotoAsync("https://www.bing.com");
-        await browser.CloseAsync();
-    }
-}
+using var playwright = await Playwright.CreateAsync();
+var firefox = playwright.Firefox;
+var browser = await firefox.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+var page = await browser.NewPageAsync();
+await page.GotoAsync("https://www.bing.com");
+await browser.CloseAsync();
 ```
 
 ## event: Browser.disconnected
@@ -271,7 +264,7 @@ browser.stop_tracing()
 ```
 
 ### param: Browser.startTracing.page
-- `page` <[Page]>
+- `page` ?<[Page]>
 
 Optional, if specified, tracing includes screenshots of the given page.
 

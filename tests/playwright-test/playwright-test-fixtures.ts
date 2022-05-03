@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 
-import type { JSONReport, JSONReportSuite } from '@playwright/test/src/reporters/json';
+import type { JSONReport, JSONReportSuite } from '@playwright/test/reporter';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { PNG } from 'pngjs';
-import rimraf from 'rimraf';
+import { rimraf, PNG } from 'playwright-core/lib/utilsBundle';
 import { promisify } from 'util';
-import { CommonFixtures, commonFixtures } from '../config/commonFixtures';
-import { serverFixtures, ServerFixtures, ServerWorkerOptions } from '../config/serverFixtures';
-import { test as base, TestInfo } from './stable-test-runner';
+import type { CommonFixtures } from '../config/commonFixtures';
+import { commonFixtures } from '../config/commonFixtures';
+import type { ServerFixtures, ServerWorkerOptions } from '../config/serverFixtures';
+import { serverFixtures } from '../config/serverFixtures';
+import type { TestInfo } from './stable-test-runner';
+import { test as base } from './stable-test-runner';
 
 const removeFolderAsync = promisify(rimraf);
 
@@ -67,6 +69,12 @@ async function writeFiles(testInfo: TestInfo, files: Files) {
       'playwright.config.ts': `
         module.exports = { projects: [ {} ] };
       `,
+    };
+  }
+  if (!Object.keys(files).some(name => name.includes('package.json'))) {
+    files = {
+      ...files,
+      'package.json': `{ "name": "test-project" }`,
     };
   }
 
@@ -120,10 +128,18 @@ async function runPlaywrightTest(childProcess: CommonFixtures['childProcess'], b
       ...process.env,
       PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile,
       PWTEST_CACHE_DIR: cacheDir,
+      // BEGIN: Reserved CI
       CI: undefined,
+      BUILD_URL: undefined,
+      CI_COMMIT_SHA: undefined,
+      CI_JOB_URL: undefined,
+      CI_PROJECT_URL: undefined,
+      GITHUB_REPOSITORY: undefined,
+      GITHUB_RUN_ID: undefined,
+      GITHUB_SERVER_URL: undefined,
+      GITHUB_SHA: undefined,
+      // END: Reserved CI
       PW_TEST_HTML_REPORT_OPEN: undefined,
-      PLAYWRIGHT_DOCKER: undefined,
-      PW_GRID: undefined,
       PW_TEST_REPORTER: undefined,
       PW_TEST_REPORTER_WS_ENDPOINT: undefined,
       PW_TEST_SOURCE_TRANSFORM: undefined,
@@ -132,7 +148,7 @@ async function runPlaywrightTest(childProcess: CommonFixtures['childProcess'], b
       NODE_OPTIONS: undefined,
       ...env,
     },
-    cwd: baseDir,
+    cwd: options.cwd ? path.resolve(baseDir, options.cwd) : baseDir,
   });
   let didSendSigint = false;
   testProcess.onOutput = () => {
@@ -196,10 +212,12 @@ type RunOptions = {
   sendSIGINTAfter?: number;
   usesCustomOutputDir?: boolean;
   additionalArgs?: string[];
+  cwd?: string,
 };
 type Fixtures = {
+  legacyConfigLoader: boolean;
   writeFiles: (files: Files) => Promise<string>;
-  runInlineTest: (files: Files, params?: Params, env?: Env, options?: RunOptions) => Promise<RunResult>;
+  runInlineTest: (files: Files, params?: Params, env?: Env, options?: RunOptions, beforeRunPlaywrightTest?: ({ baseDir }: { baseDir: string }) => Promise<void>) => Promise<RunResult>;
   runTSC: (files: Files) => Promise<TSCResult>;
 };
 
@@ -207,13 +225,19 @@ export const test = base
     .extend<CommonFixtures>(commonFixtures)
     .extend<ServerFixtures, ServerWorkerOptions>(serverFixtures)
     .extend<Fixtures>({
+      legacyConfigLoader: [false, { option: true }],
+
       writeFiles: async ({}, use, testInfo) => {
         await use(files => writeFiles(testInfo, files));
       },
 
-      runInlineTest: async ({ childProcess }, use, testInfo: TestInfo) => {
-        await use(async (files: Files, params: Params = {}, env: Env = {}, options: RunOptions = {}) => {
+      runInlineTest: async ({ childProcess, legacyConfigLoader }, use, testInfo: TestInfo) => {
+        await use(async (files: Files, params: Params = {}, env: Env = {}, options: RunOptions = {}, beforeRunPlaywrightTest?: ({ baseDir: string }) => Promise<void>) => {
           const baseDir = await writeFiles(testInfo, files);
+          if (beforeRunPlaywrightTest)
+            await beforeRunPlaywrightTest({ baseDir });
+          if (legacyConfigLoader)
+            env = { ...env, PLAYWRIGHT_LEGACY_CONFIG_MODE: '1' };
           return await runPlaywrightTest(childProcess, baseDir, params, env, options);
         });
       },
@@ -241,7 +265,8 @@ const TSCONFIG = {
     'esModuleInterop': true,
     'allowSyntheticDefaultImports': true,
     'rootDir': '.',
-    'lib': ['esnext', 'dom', 'DOM.Iterable']
+    'lib': ['esnext', 'dom', 'DOM.Iterable'],
+    'noEmit': true,
   },
   'exclude': [
     'node_modules'
@@ -253,10 +278,6 @@ export { expect } from './stable-test-runner';
 const asciiRegex = new RegExp('[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))', 'g');
 export function stripAnsi(str: string): string {
   return str.replace(asciiRegex, '');
-}
-
-export function trimLineEnds(text: string): string {
-  return text.split('\n').map(line => line.trimEnd()).join('\n');
 }
 
 export function countTimes(s: string, sub: string): number {

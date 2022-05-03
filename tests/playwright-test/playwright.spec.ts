@@ -18,7 +18,7 @@ import { test, expect, stripAnsi } from './playwright-test-fixtures';
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { registry } from '../../packages/playwright-core/lib/utils/registry';
+import { registry } from '../../packages/playwright-core/lib/server';
 
 const ffmpeg = registry.findExecutable('ffmpeg')!.executablePath();
 
@@ -120,6 +120,25 @@ test('should complain with projects and --browser', async ({ runInlineTest }) =>
   expect(result.passed).toBe(0);
   expect(result.output).toContain('Cannot use --browser option when configuration file defines projects');
 });
+
+test('should override any headless option with --headed', async ({ runInlineTest }) => {
+  const result = await runInlineTest({
+    'playwright.config.ts': `
+      module.exports = { projects: [
+        { name: 'a', use: { headless: true } }
+      ] };
+    `,
+    'a.test.ts': `
+      const { test } = pwt;
+      test('example', async ({ page }) => {
+        expect(await page.evaluate(() => navigator.userAgent)).not.toContain('Headless');
+      });
+    `,
+  }, { workers: 1, headed: true });
+  expect(result.exitCode).toBe(0);
+  expect(result.passed).toBe(1);
+});
+
 
 test('should not override use:browserName without projects', async ({ runInlineTest }) => {
   const result = await runInlineTest({
@@ -562,61 +581,4 @@ test('should work with video.path() throwing', async ({ runInlineTest }, testInf
   const dir = testInfo.outputPath(`test-results/a-pass-chromium/`);
   const video = fs.readdirSync(dir).find(file => file.endsWith('webm'));
   expect(video).toBeTruthy();
-});
-
-test('should work with connectOptions', async ({ runInlineTest }) => {
-  const result = await runInlineTest({
-    'playwright.config.js': `
-      module.exports = {
-        globalSetup: './global-setup',
-        use: {
-          connectOptions: {
-            wsEndpoint: process.env.CONNECT_WS_ENDPOINT,
-          },
-        },
-      };
-    `,
-    'global-setup.ts': `
-      module.exports = async () => {
-        const server = await pwt.chromium.launchServer();
-        process.env.CONNECT_WS_ENDPOINT = server.wsEndpoint();
-        return () => server.close();
-      };
-    `,
-    'a.test.ts': `
-      const { test } = pwt;
-      test.use({ locale: 'fr-CH' });
-      test('pass', async ({ page }) => {
-        await page.setContent('<div>PASS</div>');
-        await expect(page.locator('div')).toHaveText('PASS');
-        expect(await page.evaluate(() => navigator.language)).toBe('fr-CH');
-      });
-    `,
-  });
-  expect(result.exitCode).toBe(0);
-  expect(result.passed).toBe(1);
-});
-
-test('should throw with bad connectOptions', async ({ runInlineTest }) => {
-  const result = await runInlineTest({
-    'playwright.config.js': `
-      module.exports = {
-        use: {
-          connectOptions: {
-            wsEndpoint: 'http://does-not-exist-bad-domain.oh-no-should-not-work',
-          },
-        },
-      };
-    `,
-    'a.test.ts': `
-      const { test } = pwt;
-      test('pass', async ({ page }) => {
-        await page.setContent('<div>PASS</div>');
-        await expect(page.locator('div')).toHaveText('PASS');
-      });
-    `,
-  });
-  expect(result.exitCode).toBe(1);
-  expect(result.passed).toBe(0);
-  expect(result.output).toContain('browserType.connect:');
 });

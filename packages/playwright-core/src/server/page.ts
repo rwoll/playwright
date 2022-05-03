@@ -15,28 +15,33 @@
  * limitations under the License.
  */
 
-import * as dom from './dom';
+import type * as dom from './dom';
 import * as frames from './frames';
 import * as input from './input';
 import * as js from './javascript';
 import * as network from './network';
-import { Screenshotter, ScreenshotOptions } from './screenshotter';
-import { TimeoutSettings } from '../utils/timeoutSettings';
-import * as types from './types';
+import type { ScreenshotOptions } from './screenshotter';
+import { Screenshotter, validateScreenshotOptions } from './screenshotter';
+import { TimeoutSettings } from '../common/timeoutSettings';
+import type * as types from './types';
 import { BrowserContext } from './browserContext';
 import { ConsoleMessage } from './console';
 import * as accessibility from './accessibility';
 import { FileChooser } from './fileChooser';
-import { Progress, ProgressController } from './progress';
-import { assert, isError } from '../utils/utils';
-import { ManualPromise } from '../utils/async';
-import { debugLogger } from '../utils/debugLogger';
-import { mimeTypeToComparator, ImageComparatorOptions, ComparatorResult } from '../utils/comparators';
-import { SelectorInfo, Selectors } from './selectors';
-import { CallMetadata, SdkObject } from './instrumentation';
-import { Artifact } from './artifact';
-import { TimeoutOptions } from '../common/types';
-import { isInvalidSelectorError, ParsedSelector } from './common/selectorParser';
+import type { Progress } from './progress';
+import { ProgressController } from './progress';
+import { assert, isError } from '../utils';
+import { ManualPromise } from '../utils/manualPromise';
+import { debugLogger } from '../common/debugLogger';
+import type { ImageComparatorOptions } from '../utils/comparators';
+import { getComparator } from '../utils/comparators';
+import type { SelectorInfo, Selectors } from './selectors';
+import type { CallMetadata } from './instrumentation';
+import { SdkObject } from './instrumentation';
+import type { Artifact } from './artifact';
+import type { TimeoutOptions } from '../common/types';
+import type { ParsedSelector } from './isomorphic/selectorParser';
+import { isInvalidSelectorError } from './isomorphic/selectorParser';
 
 export interface PageDelegate {
   readonly rawMouse: input.RawMouse;
@@ -47,8 +52,11 @@ export interface PageDelegate {
   goBack(): Promise<boolean>;
   goForward(): Promise<boolean>;
   exposeBinding(binding: PageBinding): Promise<void>;
-  evaluateOnNewDocument(source: string): Promise<void>;
+  removeExposedBindings(): Promise<void>;
+  addInitScript(source: string): Promise<void>;
+  removeInitScripts(): Promise<void>;
   closePage(runBeforeUnload: boolean): Promise<void>;
+  potentiallyUninitializedPage(): Page;
   pageOrError(): Promise<Page | Error>;
 
   navigateFrame(frame: frames.Frame, url: string, referrer: string | undefined): Promise<frames.GotoResult>;
@@ -61,7 +69,7 @@ export interface PageDelegate {
   bringToFront(): Promise<void>;
 
   setBackgroundColor(color?: { r: number; g: number; b: number; a: number; }): Promise<void>;
-  takeScreenshot(progress: Progress, format: string, documentRect: types.Rect | undefined, viewportRect: types.Rect | undefined, quality: number | undefined, fitsViewport: boolean, size: 'css' | 'device'): Promise<Buffer>;
+  takeScreenshot(progress: Progress, format: string, documentRect: types.Rect | undefined, viewportRect: types.Rect | undefined, quality: number | undefined, fitsViewport: boolean, scale: 'css' | 'device'): Promise<Buffer>;
 
   isElementHandle(remoteObject: any): boolean;
   adoptElementHandle<T extends Node>(handle: dom.ElementHandle<T>, to: dom.FrameExecutionContext): Promise<dom.ElementHandle<T>>;
@@ -69,6 +77,7 @@ export interface PageDelegate {
   getOwnerFrame(handle: dom.ElementHandle): Promise<string | null>; // Returns frameId.
   getContentQuads(handle: dom.ElementHandle): Promise<types.Quad[] | null>;
   setInputFiles(handle: dom.ElementHandle<HTMLInputElement>, files: types.FilePayload[]): Promise<void>;
+  setInputFilePaths(handle: dom.ElementHandle<HTMLInputElement>, files: string[]): Promise<void>;
   getBoundingBox(handle: dom.ElementHandle): Promise<types.Rect | null>;
   getFrameElement(frame: frames.Frame): Promise<dom.ElementHandle>;
   scrollRectIntoViewIfNeeded(handle: dom.ElementHandle, rect?: types.Rect): Promise<'error:notvisible' | 'error:notconnected' | 'done'>;
@@ -143,7 +152,7 @@ export class Page extends SdkObject {
   readonly _delegate: PageDelegate;
   readonly _state: PageState;
   private readonly _pageBindings = new Map<string, PageBinding>();
-  readonly _evaluateOnNewDocumentSources: string[] = [];
+  readonly initScripts: string[] = [];
   readonly _screenshotter: Screenshotter;
   readonly _frameManager: frames.FrameManager;
   readonly accessibility: accessibility.Accessibility;
@@ -158,6 +167,7 @@ export class Page extends SdkObject {
   _video: Artifact | null = null;
   _opener: Page | undefined;
   private _frameThrottler = new FrameThrottler(10, 200);
+  private _isServerSideOnly = false;
 
   constructor(delegate: PageDelegate, browserContext: BrowserContext) {
     super(browserContext, 'page');
@@ -203,8 +213,8 @@ export class Page extends SdkObject {
       this._setIsError(error);
     }
     this._initialized = true;
-    this._browserContext.emit(BrowserContext.Events.Page, this);
-    // I may happen that page iniatialization finishes after Close event has already been sent,
+    this.emitOnContext(BrowserContext.Events.Page, this);
+    // I may happen that page initialization finishes after Close event has already been sent,
     // in that case we fire another Close event to ensure that each reported Page will have
     // corresponding Close event after it is reported on the context.
     if (this.isClosed())
@@ -213,6 +223,12 @@ export class Page extends SdkObject {
 
   initializedOrUndefined() {
     return this._initialized ? this : undefined;
+  }
+
+  emitOnContext(event: string | symbol, ...args: any[]) {
+    if (this._isServerSideOnly)
+      return;
+    this._browserContext.emit(event, ...args);
   }
 
   async _doSlowMo() {
@@ -297,6 +313,11 @@ export class Page extends SdkObject {
     const binding = new PageBinding(name, playwrightBinding, needsHandle);
     this._pageBindings.set(name, binding);
     await this._delegate.exposeBinding(binding);
+  }
+
+  async removeExposedBindings() {
+    this._pageBindings.clear();
+    await this._delegate.removeExposedBindings();
   }
 
   setExtraHTTPHeaders(headers: types.HeadersArray) {
@@ -402,16 +423,21 @@ export class Page extends SdkObject {
     await this._delegate.bringToFront();
   }
 
-  async _addInitScriptExpression(source: string) {
-    this._evaluateOnNewDocumentSources.push(source);
-    await this._delegate.evaluateOnNewDocument(source);
+  async addInitScript(source: string) {
+    this.initScripts.push(source);
+    await this._delegate.addInitScript(source);
+  }
+
+  async removeInitScripts() {
+    this.initScripts.splice(0, this.initScripts.length);
+    await this._delegate.removeInitScripts();
   }
 
   _needsRequestInterception(): boolean {
     return !!this._clientRequestInterceptor || !!this._serverRequestInterceptor || !!this._browserContext._requestInterceptor;
   }
 
-  async _setClientRequestInterceptor(handler: network.RouteHandler | undefined): Promise<void> {
+  async setClientRequestInterceptor(handler: network.RouteHandler | undefined): Promise<void> {
     this._clientRequestInterceptor = handler;
     await this._delegate.updateRequestInterception();
   }
@@ -430,55 +456,81 @@ export class Page extends SdkObject {
       return await this._screenshotter.screenshotPage(progress, options.screenshotOptions || {});
     };
 
-    const comparator = mimeTypeToComparator['image/png'];
+    const comparator = getComparator('image/png');
     const controller = new ProgressController(metadata, this);
-    const isGeneratingNewScreenshot = !options.expected;
-    if (isGeneratingNewScreenshot && options.isNot)
+    if (!options.expected && options.isNot)
       return { errorMessage: '"not" matcher requires expected result' };
+    try {
+      const format = validateScreenshotOptions(options.screenshotOptions || {});
+      if (format !== 'png')
+        throw new Error('Only PNG screenshots are supported');
+    } catch (error) {
+      return { errorMessage: error.message };
+    }
     let intermediateResult: {
       actual?: Buffer,
       previous?: Buffer,
-      errorMessage?: string,
+      errorMessage: string,
       diff?: Buffer,
     } | undefined = undefined;
+    const areEqualScreenshots = (actual: Buffer | undefined, expected: Buffer | undefined, previous: Buffer | undefined) => {
+      const comparatorResult = actual && expected ? comparator(actual, expected, options.comparatorOptions) : undefined;
+      if (comparatorResult !== undefined && !!comparatorResult === !!options.isNot)
+        return true;
+      if (comparatorResult)
+        intermediateResult = { errorMessage: comparatorResult.errorMessage, diff: comparatorResult.diff, actual, previous };
+      return false;
+    };
     const callTimeout = this._timeoutSettings.timeout(options);
     return controller.run(async progress => {
       let actual: Buffer | undefined;
       let previous: Buffer | undefined;
       const pollIntervals = [0, 100, 250, 500];
       progress.log(`${metadata.apiName}${callTimeout ? ` with timeout ${callTimeout}ms` : ''}`);
-      if (isGeneratingNewScreenshot)
-        progress.log(`  generating new screenshot expectation: waiting for 2 consecutive screenshots to match`);
+      if (options.expected)
+        progress.log(`  verifying given screenshot expectation`);
       else
-        progress.log(`  waiting for screenshot to match expectation`);
+        progress.log(`  generating new stable screenshot expectation`);
+      let isFirstIteration = true;
       while (true) {
         progress.throwIfAborted();
         if (this.isClosed())
           throw new Error('The page has closed');
-        let comparatorResult: ComparatorResult | undefined;
         const screenshotTimeout = pollIntervals.shift() ?? 1000;
         if (screenshotTimeout)
           progress.log(`waiting ${screenshotTimeout}ms before taking screenshot`);
-        if (isGeneratingNewScreenshot) {
-          previous = actual;
-          actual = await rafrafScreenshot(progress, screenshotTimeout).catch(e => undefined);
-          comparatorResult = actual && previous ? comparator(actual, previous, options.comparatorOptions) : undefined;
-        } else {
-          actual = await rafrafScreenshot(progress, screenshotTimeout).catch(e => undefined);
-          comparatorResult = actual ? comparator(actual, options.expected!, options.comparatorOptions) : undefined;
-        }
-        if (comparatorResult !== undefined && !!comparatorResult === !!options.isNot)
+        previous = actual;
+        actual = await rafrafScreenshot(progress, screenshotTimeout).catch(e => {
+          progress.log(`failed to take screenshot - ` + e.message);
+          return undefined;
+        });
+        if (!actual)
+          continue;
+        // Compare against expectation for the first iteration.
+        const expectation = options.expected && isFirstIteration ? options.expected : previous;
+        if (areEqualScreenshots(actual, expectation, previous))
           break;
-        if (comparatorResult) {
-          if (isGeneratingNewScreenshot)
-            progress.log(`2 last screenshots do not match: ${comparatorResult.errorMessage}`);
-          else
-            progress.log(`screenshot does not match expectation: ${comparatorResult.errorMessage}`);
-          intermediateResult = { errorMessage: comparatorResult.errorMessage, diff: comparatorResult.diff, actual, previous };
-        }
+        if (intermediateResult)
+          progress.log(intermediateResult.errorMessage);
+        isFirstIteration = false;
       }
 
-      return isGeneratingNewScreenshot ? { actual } : {};
+      if (!isFirstIteration)
+        progress.log(`captured a stable screenshot`);
+
+      if (!options.expected)
+        return { actual };
+
+      if (isFirstIteration) {
+        progress.log(`screenshot matched expectation`);
+        return {};
+      }
+
+      if (areEqualScreenshots(actual, options.expected, previous)) {
+        progress.log(`screenshot matched expectation`);
+        return {};
+      }
+      throw new Error(intermediateResult!.errorMessage);
     }, callTimeout).catch(e => {
       // Q: Why not throw upon isSessionClosedError(e) as in other places?
       // A: We want user to receive a friendly diff between actual and expected/previous.
@@ -487,7 +539,7 @@ export class Page extends SdkObject {
       return {
         log: e.message ? [...metadata.log, e.message] : metadata.log,
         ...intermediateResult,
-        errorMessage: intermediateResult?.errorMessage ?? e.message,
+        errorMessage: e.message,
       };
     });
   }
@@ -546,7 +598,7 @@ export class Page extends SdkObject {
     }
   }
 
-  async _setFileChooserIntercepted(enabled: boolean): Promise<void> {
+  async setFileChooserIntercepted(enabled: boolean): Promise<void> {
     await this._delegate.setFileChooserIntercepted(enabled);
   }
 
@@ -593,6 +645,10 @@ export class Page extends SdkObject {
 
   async hideHighlight() {
     await Promise.all(this.frames().map(frame => frame.hideHighlight().catch(() => {})));
+  }
+
+  markAsServerSideOnly() {
+    this._isServerSideOnly = true;
   }
 }
 

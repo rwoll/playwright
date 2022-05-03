@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-import { mimeTypeToComparator } from 'playwright-core/lib/utils/comparators';
+import { getComparator } from 'playwright-core/lib/utils/comparators';
 import * as fs from 'fs';
-import { PNG } from 'pngjs';
+import { PNG } from 'playwright-core/lib/utilsBundle';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { test, expect, stripAnsi, createImage, paintBlackPixels } from './playwright-test-fixtures';
 
-const pngComparator = mimeTypeToComparator['image/png'];
+const pngComparator = getComparator('image/png');
 
 test.describe.configure({ mode: 'parallel' });
 
@@ -50,9 +50,9 @@ test('should fail to screenshot a page with infinite animation', async ({ runInl
     `
   });
   expect(result.exitCode).toBe(1);
-  expect(stripAnsi(result.output)).toContain(`Timeout 2000ms exceeded while generating screenshot because page kept changing`);
+  expect(stripAnsi(result.output)).toContain(`Timeout 2000ms exceeded`);
   expect(stripAnsi(result.output)).toContain(`expect.toHaveScreenshot with timeout 2000ms`);
-  expect(stripAnsi(result.output)).toContain(`generating new screenshot expectation: waiting for 2 consecutive screenshots to match`);
+  expect(stripAnsi(result.output)).toContain(`generating new stable screenshot expectation`);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-actual.png'))).toBe(true);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-expected.png'))).toBe(false);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-previous.png'))).toBe(true);
@@ -63,6 +63,7 @@ test('should fail to screenshot a page with infinite animation', async ({ runInl
 test('should disable animations by default', async ({ runInlineTest }, testInfo) => {
   const cssTransitionURL = pathToFileURL(path.join(__dirname, '../assets/css-transition.html'));
   const result = await runInlineTest({
+    ...playwrightConfig({}),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         await page.goto('${cssTransitionURL}');
@@ -73,7 +74,30 @@ test('should disable animations by default', async ({ runInlineTest }, testInfo)
   expect(result.exitCode).toBe(0);
 });
 
-test('should have size as css by default', async ({ runInlineTest }, testInfo) => {
+test('should fail with proper error when unsupported argument is given', async ({ runInlineTest }, testInfo) => {
+  const cssTransitionURL = pathToFileURL(path.join(__dirname, '../assets/css-transition.html'));
+  const result = await runInlineTest({
+    ...playwrightConfig({}),
+    'a.spec.js': `
+      pwt.test('is a test', async ({ page }) => {
+        await page.goto('${cssTransitionURL}');
+        await expect(page).toHaveScreenshot({
+          clip: {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+          },
+          timeout: 2000,
+        });
+      });
+    `
+  }, { 'update-snapshots': true });
+  expect(result.exitCode).toBe(1);
+  expect(stripAnsi(result.output)).toContain(`Expected options.clip.width not to be 0`);
+});
+
+test('should have scale:css by default', async ({ runInlineTest }, testInfo) => {
   const result = await runInlineTest({
     ...playwrightConfig({ screenshotsDir: '__screenshots__' }),
     'a.spec.js': `
@@ -150,17 +174,13 @@ test('should report toHaveScreenshot step with expectation name in title', async
   const result = await runInlineTest({
     'reporter.ts': `
       class Reporter {
-        onStepBegin(test, result, step) {
-          console.log('%% begin ' + step.title);
+        onStepEnd(test, result, step) {
+          console.log('%% end ' + step.title);
         }
       }
       module.exports = Reporter;
     `,
-    'playwright.config.ts': `
-      module.exports = {
-        reporter: './reporter',
-      };
-    `,
+    ...playwrightConfig({ reporter: './reporter' }),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         // Named expectation.
@@ -173,12 +193,12 @@ test('should report toHaveScreenshot step with expectation name in title', async
 
   expect(result.exitCode).toBe(0);
   expect(result.output.split('\n').filter(line => line.startsWith('%%'))).toEqual([
-    `%% begin Before Hooks`,
-    `%% begin browserContext.newPage`,
-    `%% begin expect.toHaveScreenshot(foo.png)`,
-    `%% begin expect.toHaveScreenshot(is-a-test-1.png)`,
-    `%% begin After Hooks`,
-    `%% begin browserContext.close`,
+    `%% end browserContext.newPage`,
+    `%% end Before Hooks`,
+    `%% end expect.toHaveScreenshot(foo.png)`,
+    `%% end expect.toHaveScreenshot(is-a-test-1.png)`,
+    `%% end browserContext.close`,
+    `%% end After Hooks`,
   ]);
 });
 
@@ -287,10 +307,11 @@ test('should fail to screenshot an element with infinite animation', async ({ ru
     `
   });
   expect(result.exitCode).toBe(1);
-  expect(stripAnsi(result.output)).toContain(`Timeout 2000ms exceeded while generating screenshot because element kept changing`);
+  expect(stripAnsi(result.output)).toContain(`Timeout 2000ms exceeded`);
+  expect(stripAnsi(result.output)).toContain(`expect.toHaveScreenshot with timeout 2000ms`);
+  expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-previous.png'))).toBe(true);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-actual.png'))).toBe(true);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-expected.png'))).toBe(false);
-  expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-previous.png'))).toBe(true);
   expect(fs.existsSync(testInfo.outputPath('test-results', 'a-is-a-test', 'is-a-test-1-diff.png'))).toBe(true);
   expect(fs.existsSync(testInfo.outputPath('__screenshots__', 'a.spec.js', 'is-a-test-1.png'))).toBe(false);
 });
@@ -337,7 +358,28 @@ test('should generate default name', async ({ runInlineTest }, testInfo) => {
 });
 
 test('should compile with different option combinations', async ({ runTSC }) => {
+  const experimentalPath = path.resolve(__dirname, '..', 'config', 'experimental.d.ts');
   const result = await runTSC({
+    'playwright.config.ts': `
+      //@no-header
+      /// <reference path=${JSON.stringify(experimentalPath)} />
+      import type { PlaywrightTestConfig } from '@playwright/test';
+      const config: PlaywrightTestConfig = {
+        expect: {
+          timeout: 10000,
+          toHaveScreenshot: {
+            threshold: 0.2,
+            maxDiffPixels: 10,
+            maxDiffPixelRatio: 0.2,
+            animations: "allow",
+            fonts: "ready",
+            caret: "hide",
+            scale: "css",
+          },
+        },
+      };
+      export default config;
+    `,
     'a.spec.ts': `
       const { test } = pwt;
       test('is a test', async ({ page }) => {
@@ -350,6 +392,9 @@ test('should compile with different option combinations', async ({ runTSC }) => 
           maxDiffPixelRatio: 0.2,
           animations: "disabled",
           omitBackground: true,
+          fonts: "nowait",
+          caret: "initial",
+          scale: "device",
           timeout: 1000,
         });
       });
@@ -369,13 +414,14 @@ test('should fail when screenshot is different size', async ({ runInlineTest }) 
     `
   });
   expect(result.exitCode).toBe(1);
-  expect(stripAnsi(result.output)).toContain(`Timeout 2000ms exceeded`);
-  expect(stripAnsi(result.output)).toContain(`waiting for screenshot to match expectation`);
+  expect(stripAnsi(result.output)).toContain(`verifying given screenshot expectation`);
+  expect(stripAnsi(result.output)).toContain(`captured a stable screenshot`);
   expect(result.output).toContain('Expected an image 22px by 33px, received 1280px by 720px.');
 });
 
 test('should fail when given non-png snapshot name', async ({ runInlineTest }) => {
   const result = await runInlineTest({
+    ...playwrightConfig({}),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         await expect(page).toHaveScreenshot('snapshot.jpeg');
@@ -388,6 +434,7 @@ test('should fail when given non-png snapshot name', async ({ runInlineTest }) =
 
 test('should fail when given buffer', async ({ runInlineTest }) => {
   const result = await runInlineTest({
+    ...playwrightConfig({}),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         await expect(Buffer.from([1])).toHaveScreenshot();
@@ -410,7 +457,6 @@ test('should fail when screenshot is different pixels', async ({ runInlineTest }
   });
   expect(result.exitCode).toBe(1);
   expect(result.output).toContain('Screenshot comparison failed');
-  expect(result.output).toContain(`Timeout 2000ms exceeded`);
   expect(result.output).toContain('12345 pixels');
   expect(result.output).toContain('Call log');
   expect(result.output).toContain('ratio 0.02');
@@ -774,6 +820,7 @@ test('should respect maxDiffPixelRatio option', async ({ runInlineTest }) => {
 
 test('should throw for invalid maxDiffPixels values', async ({ runInlineTest }) => {
   expect((await runInlineTest({
+    ...playwrightConfig({}),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         await expect(page).toHaveScreenshot({
@@ -786,6 +833,7 @@ test('should throw for invalid maxDiffPixels values', async ({ runInlineTest }) 
 
 test('should throw for invalid maxDiffPixelRatio values', async ({ runInlineTest }) => {
   expect((await runInlineTest({
+    ...playwrightConfig({}),
     'a.spec.js': `
       pwt.test('is a test', async ({ page }) => {
         await expect(page).toHaveScreenshot({
@@ -876,6 +924,7 @@ test('should update expectations with retries', async ({ runInlineTest }, testIn
 function playwrightConfig(obj: any) {
   return {
     'playwright.config.js': `
+      process.env.PLAYWRIGHT_EXPERIMENTAL_FEATURES = '1';
       module.exports = ${JSON.stringify(obj, null, 2)}
     `,
   };

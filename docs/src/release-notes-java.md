@@ -5,6 +5,63 @@ title: "Release notes"
 
 <!-- TOC -->
 
+## Version 1.21
+
+### Highlights
+
+- New role selectors that allow selecting elements by their [ARIA role](https://www.w3.org/TR/wai-aria-1.2/#roles), [ARIA attributes](https://www.w3.org/TR/wai-aria-1.2/#aria-attributes) and [accessible name](https://w3c.github.io/accname/#dfn-accessible-name).
+
+  ```java
+  // Click a button with accessible name "log in"
+  page.click("role=button[name='log in']")
+  ```
+
+  Read more in [our documentation](./selectors#role-selector).
+- New `scale` option in [`method: Page.screenshot`] for smaller sized screenshots.
+- New `caret` option in [`method: Page.screenshot`] to control text caret. Defaults to `"hide"`.
+
+### Behavior Changes
+
+- Playwright now supports large file uploads (100s of MBs) via [`method: Locator.setInputFiles`] API.
+
+### Browser Versions
+
+- Chromium 101.0.4951.26
+- Mozilla Firefox 98.0.2
+- WebKit 15.4
+
+This version was also tested against the following stable channels:
+
+- Google Chrome 100
+- Microsoft Edge 100
+
+
+## Version 1.20
+
+### Highlights
+
+- New options for methods [`method: Page.screenshot`], [`method: Locator.screenshot`] and [`method: ElementHandle.screenshot`]:
+  * Option `ScreenshotAnimations.DISABLED` rewinds all CSS animations and transitions to a consistent state
+  * Option `mask: Locator[]` masks given elements, overlaying them with pink `#FF00FF` boxes.
+- [Trace Viewer](./trace-viewer) now shows [API testing requests](./api-testing).
+- [`method: Locator.highlight`] visually reveals element(s) for easier debugging.
+
+### Announcements
+
+- v1.20 is the last release to receive WebKit update for macOS 10.15 Catalina. Please update MacOS to keep using latest & greatest WebKit!
+
+### Browser Versions
+
+- Chromium 101.0.4921.0
+- Mozilla Firefox 97.0.1
+- WebKit 15.4
+
+This version was also tested against the following stable channels:
+
+- Google Chrome 99
+- Microsoft Edge 99
+
+
 ## Version 1.19
 
 ### Highlights
@@ -217,7 +274,7 @@ Previously it was not possible to get multiple header values of a response. This
 - [Response.allHeaders()](https://playwright.dev/java/docs/api/class-response#response-all-headers)
 - [Response.headersArray()](https://playwright.dev/java/docs/api/class-response#response-headers-array)
 - [Response.headerValue(name: string)](https://playwright.dev/java/docs/api/class-response#response-header-value)
-- [Response.headerValues(name: string)](https://playwright.dev/java/docs/api/class-response/#response-header-values)
+- [Response.headerValues(name: string)](https://playwright.dev/java/docs/api/class-response#response-header-values)
 
 ### 🌈 Forced-Colors emulation
 
@@ -473,7 +530,7 @@ This version of Playwright was also tested against the following stable channels
 
 - [Selecting elements based on layout](./selectors.md#selecting-elements-based-on-layout) with `:left-of()`, `:right-of()`, `:above()` and `:below()`.
 - Playwright now includes [command line interface](./cli.md), former playwright-cli.
-  ```bash js
+  ```bash java
   mvn exec:java -e -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="--help"
   ```
 - [`method: Page.selectOption`] now waits for the options to be present.

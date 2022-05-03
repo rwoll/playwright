@@ -15,15 +15,15 @@
  * limitations under the License.
  */
 
-import * as dom from './dom';
-import { Rect } from '../common/types';
+import type * as dom from './dom';
+import type { Rect } from '../common/types';
 import { helper } from './helper';
-import { Page } from './page';
-import { Frame } from './frames';
-import { ParsedSelector } from './common/selectorParser';
-import * as types from './types';
-import { Progress } from './progress';
-import { assert } from '../utils/utils';
+import type { Page } from './page';
+import type { Frame } from './frames';
+import type { ParsedSelector } from './isomorphic/selectorParser';
+import type * as types from './types';
+import type { Progress } from './progress';
+import { assert, experimentalFeaturesEnabled } from '../utils';
 import { MultiMap } from '../utils/multimap';
 
 declare global {
@@ -40,8 +40,9 @@ export type ScreenshotOptions = {
   mask?: { frame: Frame, selector: string}[],
   fullPage?: boolean,
   clip?: Rect,
-  size?: 'css' | 'device',
+  scale?: 'css' | 'device',
   fonts?: 'ready' | 'nowait',
+  caret?: 'hide' | 'initial',
 };
 
 export class Screenshotter {
@@ -86,7 +87,7 @@ export class Screenshotter {
     return this._queue.postTask(async () => {
       progress.log('taking page screenshot');
       const { viewportSize } = await this._originalViewportSize(progress);
-      await this._preparePageForScreenshot(progress, options.animations === 'disabled', options.fonts === 'ready');
+      await this._preparePageForScreenshot(progress, options.caret !== 'initial', options.animations === 'disabled', options.fonts === 'ready');
       progress.throwIfAborted(); // Avoid restoring after failure - should be done by cleanup.
 
       if (options.fullPage) {
@@ -115,10 +116,10 @@ export class Screenshotter {
       progress.log('taking element screenshot');
       const { viewportSize } = await this._originalViewportSize(progress);
 
-      await this._preparePageForScreenshot(progress, options.animations === 'disabled', options.fonts === 'ready');
+      await this._preparePageForScreenshot(progress, options.caret !== 'initial', options.animations === 'disabled', options.fonts === 'ready');
       progress.throwIfAborted(); // Do not do extra work.
 
-      await handle._waitAndScrollIntoViewIfNeeded(progress);
+      await handle._waitAndScrollIntoViewIfNeeded(progress, true /* waitForVisible */);
 
       progress.throwIfAborted(); // Do not do extra work.
       const boundingBox = await handle.boundingBox();
@@ -139,20 +140,22 @@ export class Screenshotter {
     });
   }
 
-  async _preparePageForScreenshot(progress: Progress, disableAnimations: boolean, waitForFonts: boolean) {
+  async _preparePageForScreenshot(progress: Progress, hideCaret: boolean, disableAnimations: boolean, waitForFonts: boolean) {
     if (disableAnimations)
       progress.log('  disabled all CSS animations');
     if (waitForFonts)
       progress.log('  waiting for fonts to load...');
     await Promise.all(this._page.frames().map(async frame => {
-      await frame.nonStallingEvaluateInExistingContext('(' + (async function(disableAnimations: boolean, waitForFonts: boolean) {
+      await frame.nonStallingEvaluateInExistingContext('(' + (async function(hideCaret: boolean, disableAnimations: boolean, waitForFonts: boolean) {
         const styleTag = document.createElement('style');
-        styleTag.textContent = `
-          *:not(#playwright-aaaaaaaaaa.playwright-bbbbbbbbbbb.playwright-cccccccccc.playwright-dddddddddd.playwright-eeeeeeeee) {
-            caret-color: transparent !important;
-          }
-        `;
-        document.documentElement.append(styleTag);
+        if (hideCaret) {
+          styleTag.textContent = `
+            *:not(#playwright-aaaaaaaaaa.playwright-bbbbbbbbbbb.playwright-cccccccccc.playwright-dddddddddd.playwright-eeeeeeeee) {
+              caret-color: transparent !important;
+            }
+          `;
+          document.documentElement.append(styleTag);
+        }
         const infiniteAnimationsToResume: Set<Animation> = new Set();
         const cleanupCallbacks: (() => void)[] = [];
 
@@ -222,7 +225,7 @@ export class Screenshotter {
 
         if (waitForFonts)
           await document.fonts.ready;
-      }).toString() + `)(${disableAnimations}, ${waitForFonts})`, false, 'utility').catch(() => {});
+      }).toString() + `)(${hideCaret}, ${disableAnimations}, ${waitForFonts})`, false, 'utility').catch(() => {});
     }));
     if (waitForFonts)
       progress.log('  fonts in all frames are loaded');
@@ -235,8 +238,18 @@ export class Screenshotter {
     }));
   }
 
-  async _maskElements(progress: Progress, options: ScreenshotOptions) {
+  async _maskElements(progress: Progress, options: ScreenshotOptions): Promise<() => Promise<void>> {
     const framesToParsedSelectors: MultiMap<Frame, ParsedSelector> = new MultiMap();
+
+    const cleanup = async () => {
+      await Promise.all([...framesToParsedSelectors.keys()].map(async frame => {
+        await frame.hideHighlight();
+      }));
+    };
+
+    if (!options.mask || !options.mask.length)
+      return cleanup;
+
     await Promise.all((options.mask || []).map(async ({ frame, selector }) => {
       const pair = await frame.resolveFrameForSelectorNoWait(selector);
       if (pair)
@@ -247,7 +260,8 @@ export class Screenshotter {
     await Promise.all([...framesToParsedSelectors.keys()].map(async frame => {
       await frame.maskSelectors(framesToParsedSelectors.get(frame));
     }));
-    progress.cleanupWhenAborted(() => this._page.hideHighlight());
+    progress.cleanupWhenAborted(cleanup);
+    return cleanup;
   }
 
   private async _screenshot(progress: Progress, format: 'png' | 'jpeg', documentRect: types.Rect | undefined, viewportRect: types.Rect | undefined, fitsViewport: boolean, options: ScreenshotOptions): Promise<Buffer> {
@@ -261,13 +275,13 @@ export class Screenshotter {
     }
     progress.throwIfAborted(); // Avoid extra work.
 
-    await this._maskElements(progress, options);
+    const cleanupHighlight = await this._maskElements(progress, options);
     progress.throwIfAborted(); // Avoid extra work.
 
-    const buffer = await this._page._delegate.takeScreenshot(progress, format, documentRect, viewportRect, options.quality, fitsViewport, options.size || 'device');
+    const buffer = await this._page._delegate.takeScreenshot(progress, format, documentRect, viewportRect, options.quality, fitsViewport, options.scale || 'device');
     progress.throwIfAborted(); // Avoid restoring after failure - should be done by cleanup.
 
-    await this._page.hideHighlight();
+    await cleanupHighlight();
     progress.throwIfAborted(); // Avoid restoring after failure - should be done by cleanup.
 
     if (shouldSetDefaultBackground)
@@ -307,7 +321,10 @@ function trimClipToSize(clip: types.Rect, size: types.Size): types.Rect {
   return result;
 }
 
-function validateScreenshotOptions(options: ScreenshotOptions): 'png' | 'jpeg' {
+export function validateScreenshotOptions(options: ScreenshotOptions): 'png' | 'jpeg' {
+  if (options.fonts && !experimentalFeaturesEnabled())
+    throw new Error(`To use the experimental option "fonts", set PLAYWRIGHT_EXPERIMENTAL_FEATURES=1 enviroment variable.`);
+
   let format: 'png' | 'jpeg' | null = null;
   // options.type takes precedence over inferring the type from options.path
   // because it may be a 0-length file with no extension created beforehand (i.e. as a temp file).

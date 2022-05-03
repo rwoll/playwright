@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-type Operator = '<truthy>'|'='|'*='|'|='|'^='|'$='|'~=';
+export type ParsedAttributeOperator = '<truthy>'|'='|'*='|'|='|'^='|'$='|'~=';
 export type ParsedComponentAttribute = {
+  name: string,
   jsonPath: string[],
-  op: Operator,
+  op: ParsedAttributeOperator,
   value: any,
   caseSensitive: boolean,
 };
@@ -32,13 +33,20 @@ export function checkComponentAttribute(obj: any, attr: ParsedComponentAttribute
     if (obj !== undefined && obj !== null)
       obj = obj[token];
   }
-  const objValue = typeof obj === 'string' && !attr.caseSensitive ? obj.toUpperCase() : obj;
+  return matchesAttribute(obj, attr);
+}
+
+export function matchesAttribute(value: any, attr: ParsedComponentAttribute) {
+  const objValue = typeof value === 'string' && !attr.caseSensitive ? value.toUpperCase() : value;
   const attrValue = typeof attr.value === 'string' && !attr.caseSensitive ? attr.value.toUpperCase() : attr.value;
 
   if (attr.op === '<truthy>')
     return !!objValue;
-  if (attr.op === '=')
+  if (attr.op === '=') {
+    if (attrValue instanceof RegExp)
+      return typeof objValue === 'string' && !!objValue.match(attrValue);
     return objValue === attrValue;
+  }
   if (typeof objValue !== 'string' || typeof attrValue !== 'string')
     return false;
   if (attr.op === '*=')
@@ -54,7 +62,7 @@ export function checkComponentAttribute(obj: any, attr: ParsedComponentAttribute
   return false;
 }
 
-export function parseComponentSelector(selector: string): ParsedComponentSelector {
+export function parseComponentSelector(selector: string, allowUnquotedStrings: boolean): ParsedComponentSelector {
   let wp = 0;
   let EOL = selector.length === 0;
 
@@ -77,10 +85,21 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
       eat1();
   }
 
+  function isCSSNameChar(char: string) {
+    // https://www.w3.org/TR/css-syntax-3/#ident-token-diagram
+    return (char >= '\u0080')  // non-ascii
+        || (char >= '\u0030' && char <= '\u0039')  // digit
+        || (char >= '\u0041' && char <= '\u005a')  // uppercase letter
+        || (char >= '\u0061' && char <= '\u007a')  // lowercase letter
+        || (char >= '\u0030' && char <= '\u0039')  // digit
+        || char === '\u005f'  // "_"
+        || char === '\u002d';  // "-"
+  }
+
   function readIdentifier() {
     let result = '';
     skipSpaces();
-    while (!EOL && /[-$0-9A-Z_]/i.test(next()))
+    while (!EOL && isCSSNameChar(next()))
       result += eat1();
     return result;
   }
@@ -100,6 +119,39 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
     return result;
   }
 
+  function readRegularExpression() {
+    if (eat1() !== '/')
+      syntaxError('parsing regular expression');
+    let source = '';
+    let inClass = false;
+    // https://262.ecma-international.org/11.0/#sec-literals-regular-expression-literals
+    while (!EOL) {
+      if (next() === '\\') {
+        source += eat1();
+        if (EOL)
+          syntaxError('parsing regular expressiion');
+      } else if (inClass && next() === ']') {
+        inClass = false;
+      } else if (!inClass && next() === '[') {
+        inClass = true;
+      } else if (!inClass && next() === '/') {
+        break;
+      }
+      source += eat1();
+    }
+    if (eat1() !== '/')
+      syntaxError('parsing regular expression');
+    let flags = '';
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions
+    while (!EOL && next().match(/[dgimsuy]/))
+      flags += eat1();
+    try {
+      return new RegExp(source, flags);
+    } catch (e) {
+      throw new Error(`Error while parsing selector \`${selector}\`: ${e.message}`);
+    }
+  }
+
   function readAttributeToken() {
     let token = '';
     skipSpaces();
@@ -112,7 +164,7 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
     return token;
   }
 
-  function readOperator(): Operator {
+  function readOperator(): ParsedAttributeOperator {
     skipSpaces();
     let op = '';
     if (!EOL)
@@ -121,7 +173,7 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
       op += eat1();
     if (!['=', '*=', '^=', '$=', '|=', '~='].includes(op))
       syntaxError('parsing operator');
-    return (op as Operator);
+    return (op as ParsedAttributeOperator);
   }
 
   function readAttribute(): ParsedComponentAttribute {
@@ -142,7 +194,7 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
     // check property is truthy: [enabled]
     if (next() === ']') {
       eat1();
-      return { jsonPath, op: '<truthy>', value: null, caseSensitive: false };
+      return { name: jsonPath.join('.'), jsonPath, op: '<truthy>', value: null, caseSensitive: false };
     }
 
     const operator = readOperator();
@@ -150,7 +202,11 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
     let value = undefined;
     let caseSensitive = true;
     skipSpaces();
-    if (next() === `'` || next() === `"`) {
+    if (next() === '/') {
+      if (operator !== '=')
+        throw new Error(`Error while parsing selector \`${selector}\` - cannot use ${operator} in attribute with regular expression`);
+      value = readRegularExpression();
+    } else if (next() === `'` || next() === `"`) {
       value = readQuotedString(next()).slice(1, -1);
       skipSpaces();
       if (next() === 'i' || next() === 'I') {
@@ -162,16 +218,18 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
       }
     } else {
       value = '';
-      while (!EOL && !/\s/.test(next()) && next() !== ']')
+      while (!EOL && (isCSSNameChar(next()) || next() === '+' || next() === '.'))
         value += eat1();
       if (value === 'true') {
         value = true;
       } else if (value === 'false') {
         value = false;
       } else {
-        value = +value;
-        if (isNaN(value))
-          syntaxError('parsing attribute value');
+        if (!allowUnquotedStrings) {
+          value = +value;
+          if (Number.isNaN(value))
+            syntaxError('parsing attribute value');
+        }
       }
     }
     skipSpaces();
@@ -181,7 +239,7 @@ export function parseComponentSelector(selector: string): ParsedComponentSelecto
     eat1();
     if (operator !== '=' && typeof value !== 'string')
       throw new Error(`Error while parsing selector \`${selector}\` - cannot use ${operator} in attribute with non-string matching value - ${value}`);
-    return { jsonPath, op: operator, value, caseSensitive };
+    return { name: jsonPath.join('.'), jsonPath, op: operator, value, caseSensitive };
   }
 
   const result: ParsedComponentSelector = {

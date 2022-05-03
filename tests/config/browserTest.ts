@@ -16,13 +16,14 @@
 
 import * as fs from 'fs';
 import * as os from 'os';
-import { PageTestFixtures, PageWorkerFixtures } from '../page/pageTestApi';
+import type { PageTestFixtures, PageWorkerFixtures } from '../page/pageTestApi';
 import * as path from 'path';
 import type { BrowserContext, BrowserContextOptions, BrowserType, Page } from 'playwright-core';
-import { removeFolders } from '../../packages/playwright-core/lib/utils/utils';
+import { removeFolders } from '../../packages/playwright-core/lib/utils/fileUtils';
 import { baseTest } from './baseTest';
-import { RemoteServer, RemoteServerOptions } from './remoteServer';
-import { Log } from '../../packages/playwright-core/src/server/supplements/har/har';
+import type { Log } from '../../packages/playwright-core/src/server/har/har';
+import type { RemoteServerOptions } from './remoteServer';
+import { RemoteServer } from './remoteServer';
 
 export type BrowserTestWorkerFixtures = PageWorkerFixtures & {
   browserVersion: string;

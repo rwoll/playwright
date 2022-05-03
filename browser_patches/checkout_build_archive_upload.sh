@@ -91,38 +91,66 @@ elif [[ "$BUILD_FLAVOR" == "ffmpeg-cross-compile-win64" ]]; then
 # ===========================
 elif [[ "$BUILD_FLAVOR" == "chromium-win64" ]]; then
   BROWSER_NAME="chromium"
-  EXTRA_BUILD_ARGS="--compile-win64 --full"
-  EXTRA_ARCHIVE_ARGS="--compile-win64"
+  EXTRA_BUILD_ARGS="--full --goma"
   EXPECTED_HOST_OS="MINGW"
   BUILD_BLOB_NAME="chromium-win64.zip"
 elif [[ "$BUILD_FLAVOR" == "chromium-mac" ]]; then
   BROWSER_NAME="chromium"
-  EXTRA_BUILD_ARGS="--compile-mac --full"
-  EXTRA_ARCHIVE_ARGS="--compile-mac"
+  EXTRA_BUILD_ARGS="--full --goma"
   EXPECTED_HOST_OS="Darwin"
   EXPECTED_HOST_OS_VERSION="12.2"
   BUILD_BLOB_NAME="chromium-mac.zip"
 elif [[ "$BUILD_FLAVOR" == "chromium-mac-arm64" ]]; then
   BROWSER_NAME="chromium"
-  EXTRA_BUILD_ARGS="--compile-mac-arm64 --full"
-  EXTRA_ARCHIVE_ARGS="--compile-mac-arm64"
+  EXTRA_BUILD_ARGS="--arm64 --full --goma"
   EXPECTED_HOST_OS="Darwin"
   EXPECTED_HOST_OS_VERSION="12.2"
   BUILD_BLOB_NAME="chromium-mac-arm64.zip"
 elif [[ "$BUILD_FLAVOR" == "chromium-linux" ]]; then
   BROWSER_NAME="chromium"
-  EXTRA_BUILD_ARGS="--compile-linux --full"
-  EXTRA_ARCHIVE_ARGS="--compile-linux"
+  EXTRA_BUILD_ARGS="--full --goma"
   EXPECTED_HOST_OS="Ubuntu"
   EXPECTED_HOST_OS_VERSION="18.04"
   BUILD_BLOB_NAME="chromium-linux.zip"
 elif [[ "$BUILD_FLAVOR" == "chromium-linux-arm64" ]]; then
   BROWSER_NAME="chromium"
-  EXTRA_BUILD_ARGS="--compile-linux-arm64 --full"
-  EXTRA_ARCHIVE_ARGS="--compile-linux-arm64"
+  EXTRA_BUILD_ARGS="--arm64 --full --goma"
   EXPECTED_HOST_OS="Ubuntu"
   EXPECTED_HOST_OS_VERSION="20.04"
   BUILD_BLOB_NAME="chromium-linux-arm64.zip"
+
+# ===========================
+#    CHROMIUM-TIP-OF-TREE COMPILATION
+# ===========================
+elif [[ "$BUILD_FLAVOR" == "chromium-tip-of-tree-win64" ]]; then
+  BROWSER_NAME="chromium-tip-of-tree"
+  EXTRA_BUILD_ARGS="--full --goma"
+  EXPECTED_HOST_OS="MINGW"
+  BUILD_BLOB_NAME="chromium-tip-of-tree-win64.zip"
+elif [[ "$BUILD_FLAVOR" == "chromium-tip-of-tree-mac" ]]; then
+  BROWSER_NAME="chromium-tip-of-tree"
+  EXTRA_BUILD_ARGS="--full --goma"
+  EXPECTED_HOST_OS="Darwin"
+  EXPECTED_HOST_OS_VERSION="12.2"
+  BUILD_BLOB_NAME="chromium-tip-of-tree-mac.zip"
+elif [[ "$BUILD_FLAVOR" == "chromium-tip-of-tree-mac-arm64" ]]; then
+  BROWSER_NAME="chromium-tip-of-tree"
+  EXTRA_BUILD_ARGS="--arm64 --full --goma"
+  EXPECTED_HOST_OS="Darwin"
+  EXPECTED_HOST_OS_VERSION="12.2"
+  BUILD_BLOB_NAME="chromium-tip-of-tree-mac-arm64.zip"
+elif [[ "$BUILD_FLAVOR" == "chromium-tip-of-tree-linux" ]]; then
+  BROWSER_NAME="chromium-tip-of-tree"
+  EXTRA_BUILD_ARGS="--full --goma"
+  EXPECTED_HOST_OS="Ubuntu"
+  EXPECTED_HOST_OS_VERSION="18.04"
+  BUILD_BLOB_NAME="chromium-tip-of-tree-linux.zip"
+elif [[ "$BUILD_FLAVOR" == "chromium-tip-of-tree-linux-arm64" ]]; then
+  BROWSER_NAME="chromium-tip-of-tree"
+  EXTRA_BUILD_ARGS="--arm64 --full --goma"
+  EXPECTED_HOST_OS="Ubuntu"
+  EXPECTED_HOST_OS_VERSION="20.04"
+  BUILD_BLOB_NAME="chromium-tip-of-tree-linux-arm64.zip"
 
 # ===========================
 #    CHROMIUM-WITH-SYMBOLS COMPILATION
@@ -130,16 +158,14 @@ elif [[ "$BUILD_FLAVOR" == "chromium-linux-arm64" ]]; then
 elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-win64" ]]; then
   BROWSER_NAME="chromium"
   BROWSER_DISPLAY_NAME="chromium-with-symbols"
-  EXTRA_BUILD_ARGS="--compile-win64 --symbols --full"
-  EXTRA_ARCHIVE_ARGS="--compile-win64"
+  EXTRA_BUILD_ARGS="--symbols --full --goma"
   EXPECTED_HOST_OS="MINGW"
   BUILD_BLOB_NAME="chromium-with-symbols-win64.zip"
   BUILDS_LIST="EXPECTED_BUILDS_WITH_SYMBOLS"
 elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-mac" ]]; then
   BROWSER_NAME="chromium"
   BROWSER_DISPLAY_NAME="chromium-with-symbols"
-  EXTRA_BUILD_ARGS="--compile-mac --symbols --full"
-  EXTRA_ARCHIVE_ARGS="--compile-mac"
+  EXTRA_BUILD_ARGS="--symbols --full --goma"
   EXPECTED_HOST_OS="Darwin"
   EXPECTED_HOST_OS_VERSION="12.2"
   BUILD_BLOB_NAME="chromium-with-symbols-mac.zip"
@@ -147,8 +173,7 @@ elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-mac" ]]; then
 elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-mac-arm64" ]]; then
   BROWSER_NAME="chromium"
   BROWSER_DISPLAY_NAME="chromium-with-symbols"
-  EXTRA_BUILD_ARGS="--compile-mac-arm64 --symbols --full"
-  EXTRA_ARCHIVE_ARGS="--compile-mac-arm64"
+  EXTRA_BUILD_ARGS="--arm64 --symbols --full --goma"
   EXPECTED_HOST_OS="Darwin"
   EXPECTED_HOST_OS_VERSION="12.2"
   BUILD_BLOB_NAME="chromium-with-symbols-mac-arm64.zip"
@@ -156,8 +181,7 @@ elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-mac-arm64" ]]; then
 elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-linux" ]]; then
   BROWSER_NAME="chromium"
   BROWSER_DISPLAY_NAME="chromium-with-symbols"
-  EXTRA_BUILD_ARGS="--compile-linux --symbols --full"
-  EXTRA_ARCHIVE_ARGS="--compile-linux"
+  EXTRA_BUILD_ARGS="--symbols --full --goma"
   EXPECTED_HOST_OS="Ubuntu"
   EXPECTED_HOST_OS_VERSION="18.04"
   BUILD_BLOB_NAME="chromium-with-symbols-linux.zip"
@@ -165,8 +189,7 @@ elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-linux" ]]; then
 elif [[ "$BUILD_FLAVOR" == "chromium-with-symbols-linux-arm64" ]]; then
   BROWSER_NAME="chromium"
   BROWSER_DISPLAY_NAME="chromium-with-symbols-arm64"
-  EXTRA_BUILD_ARGS="--compile-linux-arm64 --symbols --full"
-  EXTRA_ARCHIVE_ARGS="--compile-linux-arm64"
+  EXTRA_BUILD_ARGS="--arm64 --symbols --full --goma"
   EXPECTED_HOST_OS="Ubuntu"
   EXPECTED_HOST_OS_VERSION="20.04"
   BUILD_BLOB_NAME="chromium-with-symbols-linux-arm64.zip"
@@ -296,6 +319,11 @@ elif [[ "$BUILD_FLAVOR" == "webkit-mac-12-arm64" ]]; then
   EXPECTED_HOST_OS_VERSION="12.2"
   EXPECTED_ARCH="arm64"
   BUILD_BLOB_NAME="webkit-mac-12-arm64.zip"
+elif [[ "$BUILD_FLAVOR" == "webkit-mac-11" ]]; then
+  BROWSER_NAME="webkit"
+  EXPECTED_HOST_OS="Darwin"
+  EXPECTED_HOST_OS_VERSION="11.6"
+  BUILD_BLOB_NAME="webkit-mac-11.zip"
 elif [[ "$BUILD_FLAVOR" == "webkit-mac-11-arm64" ]]; then
   BROWSER_NAME="webkit"
   EXPECTED_HOST_OS="Darwin"
@@ -337,7 +365,7 @@ if [[ "$CURRENT_HOST_OS_VERSION" != "$EXPECTED_HOST_OS_VERSION" ]]; then
   exit 1
 fi
 
-if [[ $(uname) == MINGW* ]]; then
+if [[ $(uname) == MINGW* || "$(uname)" == MSYS* ]]; then
   ZIP_PATH="$PWD/archive-$BROWSER_NAME.zip"
   LOG_PATH="$PWD/log-$BROWSER_NAME.zip"
 else
