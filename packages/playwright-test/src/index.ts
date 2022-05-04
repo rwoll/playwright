@@ -25,6 +25,7 @@ export { expect } from './expect';
 export const _baseTest: TestType<{}, {}> = rootTestType.test;
 export { addRunnerPlugin as _addRunnerPlugin } from './plugins';
 import * as outOfProcess from 'playwright-core/lib/outofprocess';
+import { pendingFixturePlugins } from './plugins';
 
 if ((process as any)['__pw_initiator__']) {
   const originalStackTraceLimit = Error.stackTraceLimit;
@@ -50,7 +51,8 @@ type WorkerFixtures = PlaywrightWorkerArgs & PlaywrightWorkerOptions & {
   _snapshotSuffix: string;
 };
 
-export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
+
+let _t = _baseTest.extend<TestFixtures, WorkerFixtures>({
   defaultBrowserType: [ 'chromium', { scope: 'worker', option: true } ],
   browserName: [ ({ defaultBrowserType }, use) => use(defaultBrowserType), { scope: 'worker', option: true } ],
   playwright: [async ({ }, use) => {
@@ -501,6 +503,18 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
 
 });
 
+export const test = new Proxy(_t, {
+  get: (_, prop, receiver) => {
+    console.log(pendingFixturePlugins, process.pid)
+    // while (pendingFixturePlugins.length) {
+    //   const plugin = pendingFixturePlugins.shift()!;
+    //   if (plugin.fixtures)
+    //     _t = _t.extend(plugin.fixtures);
+    //   console.log(plugin.name)
+    // }
+  return Reflect.get(_t, prop, receiver);
+}
+});
 
 function formatPendingCalls(calls: ParsedStackTrace[]) {
   calls = calls.filter(call => !!call.apiName);

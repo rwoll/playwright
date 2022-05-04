@@ -37,6 +37,10 @@ async function pageWithHar(contextFactory: (options?: BrowserContextOptions) => 
   };
 }
 
+it.only('works', async ({ browser }) => {
+  expect(2).toBe(1);
+});
+
 it('should throw without path', async ({ browser }) => {
   const error = await browser.newContext({ recordHar: {} as any }).catch(e => e);
   expect(error.message).toContain('recordHar.path: expected string, got undefined');

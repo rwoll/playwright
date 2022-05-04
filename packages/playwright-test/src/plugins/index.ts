@@ -16,18 +16,21 @@
 
 import type { Suite } from '../../types/testReporter';
 import type { Runner } from '../runner';
-import type { FullConfig } from '../types';
+import type { Fixtures, FullConfig } from '../types';
 
 export interface TestRunnerPlugin {
   name: string;
   setup?(config: FullConfig, configDir: string, rootSuite: Suite): Promise<void>;
   teardown?(): Promise<void>;
+  fixtures?: Fixtures;
 }
 
 export { webServer } from './webServerPlugin';
 export { gitCommitInfo } from './gitCommitInfoPlugin';
 
 let runnerInstanceToAddPluginsTo: Runner | undefined;
+
+export let pendingFixturePlugins: TestRunnerPlugin[] = [];
 
 export const setRunnerToAddPluginsTo = (runner: Runner) => {
   runnerInstanceToAddPluginsTo = runner;
@@ -38,5 +41,6 @@ export const addRunnerPlugin = (plugin: TestRunnerPlugin | (() => TestRunnerPlug
   if (runnerInstanceToAddPluginsTo) {
     plugin = typeof plugin === 'function' ? plugin() : plugin;
     runnerInstanceToAddPluginsTo.addPlugin(plugin);
+    pendingFixturePlugins.push(plugin);
   }
 };

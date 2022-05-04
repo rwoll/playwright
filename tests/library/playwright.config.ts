@@ -22,6 +22,18 @@ import * as path from 'path';
 import type { TestModeWorkerOptions } from '../config/testModeFixtures';
 import type { CoverageWorkerOptions } from '../config/coverageFixtures';
 
+// @ts-ignore
+import { _addRunnerPlugin } from '@playwright/test';
+
+_addRunnerPlugin({
+  name: 'playwright:example',
+  fixtures: {
+    foo: async ({}, use) => {
+      await use(12);
+    },
+  },
+})
+
 type BrowserName = 'chromium' | 'firefox' | 'webkit';
 
 const getExecutablePath = (browserName: BrowserName) => {
