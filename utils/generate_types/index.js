@@ -573,6 +573,8 @@ class TypesGenerator {
         'PlaywrightWorkerOptions.defaultBrowserType',
         'PlaywrightWorkerArgs.playwright',
         'Matchers',
+        'TestFixtures',
+        'WorkerFixtures',
       ]),
       doNotExportClassNames: new Set([...assertionClasses, 'TestProject']),
       includeExperimental,

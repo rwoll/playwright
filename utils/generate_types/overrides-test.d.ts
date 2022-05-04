@@ -312,6 +312,12 @@ declare global {
   export namespace PlaywrightTest {
     export interface Matchers<R, T = unknown> {
     }
+
+    export interface TestFixtures extends KeyValue {
+    }
+
+    export interface WorkerFixtures extends KeyValue {
+    }
   }
 }
 // --- ENDGLOBAL ---
@@ -320,7 +326,7 @@ declare global {
  * These tests are executed in Playwright environment that launches the browser
  * and provides a fresh page to each test.
  */
-export const test: TestType<PlaywrightTestArgs & PlaywrightTestOptions, PlaywrightWorkerArgs & PlaywrightWorkerOptions>;
+export const test: TestType<PlaywrightTestArgs & PlaywrightTestOptions & PlaywrightTest.TestFixtures, PlaywrightWorkerArgs & PlaywrightWorkerOptions & PlaywrightTest.WorkerFixtures>;
 export default test;
 
 export const _baseTest: TestType<{}, {}>;

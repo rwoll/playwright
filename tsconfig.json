@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "typeRoots": ["./node_modules/@types", "./extras"],
     "target": "ES2019",
     "module": "commonjs",
     "lib": ["esnext", "dom", "DOM.Iterable"],

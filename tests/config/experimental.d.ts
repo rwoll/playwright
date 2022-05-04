@@ -19654,7 +19654,7 @@ type Awaited<T> = T extends PromiseLike<infer U> ? U : T;
  * These tests are executed in Playwright environment that launches the browser
  * and provides a fresh page to each test.
  */
-export const test: TestType<PlaywrightTestArgs & PlaywrightTestOptions, PlaywrightWorkerArgs & PlaywrightWorkerOptions>;
+export const test: TestType<PlaywrightTestArgs & PlaywrightTestOptions & PlaywrightTest.TestFixtures, PlaywrightWorkerArgs & PlaywrightWorkerOptions & PlaywrightTest.WorkerFixtures>;
 export default test;
 
 export const _baseTest: TestType<{}, {}>;
