@@ -19,6 +19,7 @@ import type { APIRequestEvent, APIRequestFinishedEvent } from '../fetch';
 import { APIRequestContext } from '../fetch';
 import { helper } from '../helper';
 import * as network from '../network';
+import type { Worker } from '../page';
 import { Page } from '../page';
 import type * as har from './har';
 import { calculateSha1, monotonicTime } from '../../utils';
@@ -138,11 +139,13 @@ export class HarTracer {
     this._addBarrier(page, promise);
   }
 
-  private _addBarrier(page: Page, promise: Promise<void>) {
+  private _addBarrier(target: Page | Worker | null, promise: Promise<void>) {
+    if (!target)
+      return null;
     if (!this._options.waitForContentOnStop)
       return;
     const race = Promise.race([
-      new Promise<void>(f => page.on('close', () => {
+      new Promise<void>(f => target.on('close', () => {
         this._barrierPromises.delete(race);
         f();
       })),
@@ -200,14 +203,15 @@ export class HarTracer {
   private _onRequest(request: network.Request) {
     if (!this._shouldIncludeEntryWithUrl(request.url()))
       return;
-    const page = request.frame()._page;
+    const frame = request.frame();
+    const page = frame?._page;
     const url = network.parsedURL(request.url());
     if (!url)
       return;
 
-    const pageEntry = this._ensurePageEntry(page);
-    const harEntry = createHarEntry(request.method(), url, request.guid, request.frame().guid);
-    harEntry.pageref = pageEntry.id;
+    const pageEntry = page ? this._ensurePageEntry(page) : null;
+    const harEntry = createHarEntry(request.method(), url, request.guid, frame?.guid);
+    harEntry.pageref = pageEntry?.id;
     harEntry.request.postData = postDataForRequest(request, this._options.content);
     harEntry.request.bodySize = request.bodySize();
     if (request.redirectedFrom()) {
@@ -223,7 +227,8 @@ export class HarTracer {
   private async _onRequestFinished(request: network.Request, response: network.Response | null) {
     if (!response)
       return;
-    const page = request.frame()._page;
+    const frame = request.frame();
+    const page = frame?._page;
     const harEntry = this._entryForRequest(request);
     if (!harEntry)
       return;
@@ -251,7 +256,7 @@ export class HarTracer {
         this._check();
       }
     };
-    this._addBarrier(page, compressionCalculationBarrier.barrier);
+    this._addBarrier(page || request.serviceWorker(), compressionCalculationBarrier.barrier);
 
     const promise = response.body().then(buffer => {
       if (this._options.skipScripts && request.resourceType() === 'script') {
@@ -274,8 +279,8 @@ export class HarTracer {
       if (this._started)
         this._delegate.onEntryFinished(harEntry);
     });
-    this._addBarrier(page, promise);
-    this._addBarrier(page, response.sizes().then(sizes => {
+    this._addBarrier(page || request.serviceWorker(), promise);
+    this._addBarrier(page || request.serviceWorker(), response.sizes().then(sizes => {
       harEntry.response.bodySize = sizes.responseBodySize;
       harEntry.response.headersSize = sizes.responseHeadersSize;
       // Fallback for WebKit by calculating it manually
@@ -313,8 +318,8 @@ export class HarTracer {
   }
 
   private _onResponse(response: network.Response) {
-    const page = response.frame()._page;
-    const pageEntry = this._ensurePageEntry(page);
+    const page = response.frame()?._page;
+    const pageEntry = page ? this._ensurePageEntry(page) : null;
     const harEntry = this._entryForRequest(response.request());
     if (!harEntry)
       return;
@@ -339,7 +344,7 @@ export class HarTracer {
       _transferSize: -1
     };
     const timing = response.timing();
-    if (pageEntry.startedDateTime.valueOf() > timing.startTime)
+    if (pageEntry && pageEntry.startedDateTime.valueOf() > timing.startTime)
       pageEntry.startedDateTime = new Date(timing.startTime);
     const dns = timing.domainLookupEnd !== -1 ? helper.millisToRoundishMillis(timing.domainLookupEnd - timing.domainLookupStart) : -1;
     const connect = timing.connectEnd !== -1 ? helper.millisToRoundishMillis(timing.connectEnd - timing.connectStart) : -1;
@@ -355,22 +360,22 @@ export class HarTracer {
       receive,
     };
     harEntry.time = [dns, connect, ssl, wait, receive].reduce((pre, cur) => cur > 0 ? cur + pre : pre, 0);
-    this._addBarrier(page, response.serverAddr().then(server => {
+    this._addBarrier(page || request.serviceWorker(), response.serverAddr().then(server => {
       if (server?.ipAddress)
         harEntry.serverIPAddress = server.ipAddress;
       if (server?.port)
         harEntry._serverPort = server.port;
     }));
-    this._addBarrier(page, response.securityDetails().then(details => {
+    this._addBarrier(page || request.serviceWorker(), response.securityDetails().then(details => {
       if (details)
         harEntry._securityDetails = details;
     }));
-    this._addBarrier(page, request.rawRequestHeaders().then(headers => {
+    this._addBarrier(page || request.serviceWorker(), request.rawRequestHeaders().then(headers => {
       for (const header of headers.filter(header => header.name.toLowerCase() === 'cookie'))
         harEntry.request.cookies.push(...header.value.split(';').map(parseCookie));
       harEntry.request.headers = headers;
     }));
-    this._addBarrier(page, response.rawResponseHeaders().then(headers => {
+    this._addBarrier(page || request.serviceWorker(), response.rawResponseHeaders().then(headers => {
       for (const header of headers.filter(header => header.name.toLowerCase() === 'set-cookie'))
         harEntry.response.cookies.push(parseCookie(header.value));
       harEntry.response.headers = headers;
@@ -418,7 +423,7 @@ export class HarTracer {
   }
 }
 
-function createHarEntry(method: string, url: URL, requestref: string, frameref: string): har.Entry {
+function createHarEntry(method: string, url: URL, requestref: string, frameref?: string): har.Entry {
   const harEntry: har.Entry = {
     _requestref: requestref,
     _frameref: frameref,

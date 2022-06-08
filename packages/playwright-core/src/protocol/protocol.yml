@@ -2421,7 +2421,8 @@ Request:
   type: interface
 
   initializer:
-    frame: Frame
+    frame: Frame?
+    serviceWorker: Worker?
     url: string
     resourceType: string
     method: string
@@ -2476,7 +2477,6 @@ Route:
         body: string?
         isBase64: boolean?
         fetchResponseUid: string?
-
 
 ResourceTiming:
   type: object
