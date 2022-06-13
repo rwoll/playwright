@@ -155,18 +155,18 @@ with sync_playwright() as p:
 
 If you want to bundle browsers with the executables:
 
-```bash bash-flavor=bash
+```bash tab=bash-bash
 PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium
 pyinstaller -F main.py
 ```
 
-```bash bash-flavor=batch
+```batch tab=bash-batch
 set PLAYWRIGHT_BROWSERS_PATH=0
 playwright install chromium
 pyinstaller -F main.py
 ```
 
-```bash bash-flavor=powershell
+```powershell tab=bash-powershell
 $env:PLAYWRIGHT_BROWSERS_PATH="0"
 playwright install chromium
 pyinstaller -F main.py
@@ -214,7 +214,7 @@ Depending on your Linux distribution, you might need to install additional
 dependencies to run the browsers.
 
 :::note
-Only Ubuntu 18.04 and Ubuntu 20.04 are officially supported.
+Only Ubuntu 18.04, 20.04, and 22.04 are officially supported.
 :::
 
 See also in the [Command line tools](./cli.md#install-system-dependencies)
