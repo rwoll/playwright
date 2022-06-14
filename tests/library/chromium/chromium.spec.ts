@@ -219,7 +219,7 @@ test('should report intercepted service worker requests in HAR', async ({ pageWi
     const req = log.entries.filter(e => e.request.url.endsWith('request-from-within-worker'));
     expect.soft(req).toHaveLength(1);
     expect.soft(req[0].response.headers.filter(v => v.name === 'x-pw-test')).toEqual([{ name: 'x-pw-test', value: 'request-within-worker' }]);
-    expect.soft(Buffer.from(req[0].response.content.text, 'base64').toString()).toBe('"intercepted!"');
+    expect.soft(req[0].response.content.text).toBe('"intercepted!"');
   }
 });
 
