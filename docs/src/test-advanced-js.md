@@ -140,7 +140,7 @@ export const test = base.extend<{ saveLogs: void }>({
 To launch a server during the tests, use the `webServer` option in the [configuration file](#configuration-object).
 
 If `port` is specified in the config, test runner will wait for `127.0.0.1:port` or `::1:port` to be available before running the tests.
-If `url` is specified in the config, test runner will wait for that `url` to return 2xx response before running the tests.
+If `url` is specified in the config, test runner will wait for that `url` to return a 2xx, 3xx, 400, 401, 402, or 403 response before running the tests.
 
 For continuous integration, you may want to use the `reuseExistingServer: !process.env.CI` option which does not use an existing server on the CI. To see the stdout, you can set the `DEBUG=pw:webserver` environment variable.
 
@@ -355,6 +355,72 @@ test('test', async ({ page }) => {
   const complexData = JSON.parse(BAR);
   expect(BAR).toEqual({ some: 'data' });
 });
+```
+
+### Capturing trace of failures during global setup
+
+In some instances, it may be useful to capture a trace of failures encountered during the global setup. In order to do this, you must [start tracing](./api/class-tracing.md#tracing-start) in your setup, and you must ensure that you [stop tracing](./api/class-tracing.md#tracing-stop) if an error occurs before that error is thrown. This can be achieved by wrapping your setup in a `try...catch` block.  Here is an example that expands the global setup example to capture a trace.
+
+```js tab=js-js
+// global-setup.js
+const { chromium } = require('@playwright/test');
+
+module.exports = async config => {
+  const { baseURL, storageState } = config.projects[0].use;
+  const browser = await chromium.launch();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    await page.goto(baseURL);
+    await page.fill('input[name="user"]', 'user');
+    await page.fill('input[name="password"]', 'password');
+    await page.click('text=Sign in');
+    await context.storageState({ path: storageState });
+    await context.tracing.stop({
+      path: './test-results/setup-trace.zip',
+    })
+    await browser.close();
+  } catch (error) {
+    await context.tracing.stop({
+      path: './test-results/failed-setup-trace.zip',
+    });
+    await browser.close();
+    throw error;
+  }
+};
+```
+
+```js tab=js-ts
+// global-setup.ts
+import { chromium, FullConfig } from '@playwright/test';
+
+async function globalSetup(config: FullConfig) {
+  const { baseURL, storageState } = config.projects[0].use;
+  const browser = await chromium.launch();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    await page.goto(baseURL!);
+    await page.fill('input[name="user"]', 'user');
+    await page.fill('input[name="password"]', 'password');
+    await page.click('text=Sign in');
+    await context.storageState({ path: storageState as string });
+    await context.tracing.stop({
+      path: './test-results/setup-trace.zip',
+    })
+    await page.close();
+  } catch (error) {
+    await context.tracing.stop({
+      path: './test-results/failed-setup-trace.zip',
+    });
+    await page.close();
+    throw error;
+  }
+}
+
+export default globalSetup;
 ```
 
 ## Projects

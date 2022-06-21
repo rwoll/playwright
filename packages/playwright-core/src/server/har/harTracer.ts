@@ -22,13 +22,15 @@ import * as network from '../network';
 import type { Worker } from '../page';
 import { Page } from '../page';
 import type * as har from './har';
-import { calculateSha1, monotonicTime } from '../../utils';
+import { assert, calculateSha1, monotonicTime } from '../../utils';
 import type { RegisteredListener } from '../../utils/eventsHelper';
 import { eventsHelper } from '../../utils/eventsHelper';
 import { mime } from '../../utilsBundle';
 import { ManualPromise } from '../../utils/manualPromise';
 import { getPlaywrightVersion } from '../../common/userAgent';
 import { urlMatches } from '../../common/netUtils';
+import { Frame } from '../frames';
+import type { LifecycleEvent } from '../types';
 
 const FALLBACK_HTTP_VERSION = 'HTTP/1.1';
 
@@ -39,7 +41,7 @@ export interface HarTracerDelegate {
 }
 
 type HarTracerOptions = {
-  content: 'omit' | 'sha1' | 'embedded';
+  content: 'omit' | 'attach' | 'embed';
   skipScripts: boolean;
   waitForContentOnStop: boolean;
   urlFilter?: string | RegExp;
@@ -94,8 +96,12 @@ export class HarTracer {
   private _ensurePageEntry(page: Page) {
     let pageEntry = this._pageEntries.get(page);
     if (!pageEntry) {
-      page.on(Page.Events.DOMContentLoaded, () => this._onDOMContentLoaded(page));
-      page.on(Page.Events.Load, () => this._onLoad(page));
+      page.mainFrame().on(Frame.Events.AddLifecycle, (event: LifecycleEvent) => {
+        if (event === 'load')
+          this._onLoad(page);
+        if (event === 'domcontentloaded')
+          this._onDOMContentLoaded(page);
+      });
 
       pageEntry = {
         startedDateTime: new Date(),
@@ -161,7 +167,7 @@ export class HarTracer {
     const harEntry = createHarEntry(event.method, event.url, '', '');
     harEntry.request.cookies = event.cookies;
     harEntry.request.headers = Object.entries(event.headers).map(([name, value]) => ({ name, value }));
-    harEntry.request.postData = postDataForBuffer(event.postData || null, event.headers['content-type'],  this._options.content);
+    harEntry.request.postData = this._postDataForBuffer(event.postData || null, event.headers['content-type'],  this._options.content);
     harEntry.request.bodySize = event.postData?.length || 0;
     (event as any)[this._entrySymbol] = harEntry;
     if (this._started)
@@ -212,7 +218,7 @@ export class HarTracer {
     const pageEntry = page ? this._ensurePageEntry(page) : null;
     const harEntry = createHarEntry(request.method(), url, request.guid, frame?.guid);
     harEntry.pageref = pageEntry?.id;
-    harEntry.request.postData = postDataForRequest(request, this._options.content);
+    harEntry.request.postData = this._postDataForRequest(request, this._options.content);
     harEntry.request.bodySize = request.bodySize();
     if (request.redirectedFrom()) {
       const fromEntry = this._entryForRequest(request.redirectedFrom()!);
@@ -220,8 +226,8 @@ export class HarTracer {
         fromEntry.response.redirectURL = request.url();
     }
     (request as any)[this._entrySymbol] = harEntry;
-    if (this._started)
-      this._delegate.onEntryStarted(harEntry);
+    assert(this._started);
+    this._delegate.onEntryStarted(harEntry);
   }
 
   private async _onRequestFinished(request: network.Request, response: network.Response | null) {
@@ -270,12 +276,6 @@ export class HarTracer {
     }).catch(() => {
       compressionCalculationBarrier.setDecodedBodySize(0);
     }).then(() => {
-      const postData = response.request().postDataBuffer();
-      if (postData && harEntry.request.postData && this._options.content === 'sha1') {
-        harEntry.request.postData._sha1 = calculateSha1(postData) + '.' + (mime.getExtension(harEntry.request.postData.mimeType) || 'dat');
-        if (this._started)
-          this._delegate.onContentBlob(harEntry.request.postData._sha1, postData);
-      }
       if (this._started)
         this._delegate.onEntryFinished(harEntry);
     });
@@ -307,7 +307,7 @@ export class HarTracer {
       return;
     }
     content.size = buffer.length;
-    if (this._options.content === 'embedded') {
+    if (this._options.content === 'embed') {
       // Sometimes, we can receive a font/media file with textual mime type. Browser
       // still interprets them correctly, but the 'content-type' header is obviously wrong.
       if (isTextualMimeType(content.mimeType) && resourceType !== 'font') {
@@ -316,7 +316,7 @@ export class HarTracer {
         content.text = buffer.toString('base64');
         content.encoding = 'base64';
       }
-    } else if (this._options.content === 'sha1') {
+    } else if (this._options.content === 'attach') {
       content._sha1 = calculateSha1(buffer) + '.' + (mime.getExtension(content.mimeType) || 'dat');
       if (this._started)
         this._delegate.onContentBlob(content._sha1, buffer);
@@ -330,8 +330,6 @@ export class HarTracer {
     if (!harEntry)
       return;
     const request = response.request();
-
-    harEntry.request.postData = postDataForRequest(request, this._options.content);
 
     harEntry.response = {
       status: response.status(),
@@ -427,6 +425,45 @@ export class HarTracer {
     this._pageEntries.clear();
     return log;
   }
+
+  private _postDataForRequest(request: network.Request, content: 'omit' | 'attach' | 'embed'): har.PostData | undefined {
+    const postData = request.postDataBuffer();
+    if (!postData)
+      return;
+
+    const contentType = request.headerValue('content-type');
+    return this._postDataForBuffer(postData, contentType, content);
+  }
+
+  private  _postDataForBuffer(postData: Buffer | null, contentType: string | undefined, content: 'omit' | 'attach' | 'embed'): har.PostData | undefined {
+    if (!postData)
+      return;
+
+    contentType ??= 'application/octet-stream';
+
+    const result: har.PostData = {
+      mimeType: contentType,
+      text: '',
+      params: []
+    };
+
+    if (content === 'embed' && contentType !== 'application/octet-stream')
+      result.text = postData.toString();
+
+    if (content === 'attach') {
+      result._sha1 = calculateSha1(postData) + '.' + (mime.getExtension(contentType) || 'dat');
+      this._delegate.onContentBlob(result._sha1, postData);
+    }
+
+    if (contentType === 'application/x-www-form-urlencoded') {
+      const parsed = new URLSearchParams(postData.toString());
+      for (const [name, value] of parsed.entries())
+        result.params.push({ name, value });
+    }
+
+    return result;
+  }
+
 }
 
 function createHarEntry(method: string, url: URL, requestref: string, frameref?: string): har.Entry {
@@ -474,38 +511,6 @@ function createHarEntry(method: string, url: URL, requestref: string, frameref?:
   return harEntry;
 }
 
-function postDataForRequest(request: network.Request, content: 'omit' | 'sha1' | 'embedded'): har.PostData | undefined {
-  const postData = request.postDataBuffer();
-  if (!postData)
-    return;
-
-  const contentType = request.headerValue('content-type');
-  return postDataForBuffer(postData, contentType, content);
-}
-
-function postDataForBuffer(postData: Buffer | null, contentType: string | undefined, content: 'omit' | 'sha1' | 'embedded'): har.PostData | undefined {
-  if (!postData)
-    return;
-
-  contentType ??= 'application/octet-stream';
-
-  const result: har.PostData = {
-    mimeType: contentType,
-    text: '',
-    params: []
-  };
-
-  if (content === 'embedded' && contentType !== 'application/octet-stream')
-    result.text = postData.toString();
-
-  if (contentType === 'application/x-www-form-urlencoded') {
-    const parsed = new URLSearchParams(postData.toString());
-    for (const [name, value] of parsed.entries())
-      result.params.push({ name, value });
-  }
-  return result;
-}
-
 function parseCookie(c: string): har.Cookie {
   const cookie: har.Cookie = {
     name: '',
@@ -542,5 +547,5 @@ function parseCookie(c: string): har.Cookie {
 }
 
 function isTextualMimeType(mimeType: string) {
-  return !!mimeType.match(/^(text\/.*?|application\/(json|(x-)?javascript|xml.*?|ecmascript)|image\/svg(\+xml)?|application\/.*?(\+json|\+xml))(;\s*charset=.*)?$/);
+  return !!mimeType.match(/^(text\/.*?|application\/(json|(x-)?javascript|xml.*?|ecmascript|graphql|x-www-form-urlencoded)|image\/svg(\+xml)?|application\/.*?(\+json|\+xml))(;\s*charset=.*)?$/);
 }

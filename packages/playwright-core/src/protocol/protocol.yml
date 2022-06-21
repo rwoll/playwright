@@ -224,8 +224,13 @@ SerializedError:
 RecordHarOptions:
   type: object
   properties:
-    omitContent: boolean?
     path: string
+    content:
+      type: enum?
+      literals:
+      - embed
+      - attach
+      - omit
     urlGlob: string?
     urlRegexSource: string?
     urlRegexFlags: string?
@@ -473,26 +478,42 @@ LocalUtils:
           type: array
           items: NameValue
 
-    harFindEntry:
+    harOpen:
       parameters:
-        # HAR file is cached until clearHarCache is called
-        cacheKey: string
-        harFile: string
+        file: string
+      returns:
+        harId: string?
+        error: string?
+
+    harLookup:
+      parameters:
+        harId: string
         url: string
         method: string
-        needBody: boolean
+        headers:
+          type: array
+          items: NameValue
+        postData: string?
+        isNavigationRequest: boolean
       returns:
-        error: string?
+        action:
+          type: enum
+          literals:
+          - error
+          - redirect
+          - fulfill
+          - noentry
+        message: string?
+        redirectURL: string?
         status: number?
         headers:
           type: array?
           items: NameValue
-        body: binary?
+        body: string?
 
-    harClearCache:
+    harClose:
       parameters:
-        cacheKey: string
-
+        harId: string
 
 Root:
   type: interface
@@ -1339,8 +1360,6 @@ Page:
         suggestedFilename: string
         artifact: Artifact
 
-    domcontentloaded:
-
     fileChooser:
       parameters:
         element: ElementHandle
@@ -1353,8 +1372,6 @@ Page:
     frameDetached:
       parameters:
         frame: Frame
-
-    load:
 
     pageError:
       parameters:
@@ -2478,6 +2495,7 @@ Route:
     abort:
       parameters:
         errorCode: string?
+        redirectAbortedNavigationToUrl: string?
 
     continue:
       parameters:

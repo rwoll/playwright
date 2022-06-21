@@ -23,11 +23,13 @@ import { assert, createGuid } from '../../utils';
 import type { DispatcherScope } from './dispatcher';
 import { Dispatcher } from './dispatcher';
 import { yazl, yauzl } from '../../zipBundle';
-import type { Log, Entry } from '../har/har';
+import { ZipFile } from '../../utils/zipFile';
+import type { HAREntry, HARFile, HARHeader } from '../../../types/har';
+import type { HeadersArray } from '../types';
 
 export class LocalUtilsDispatcher extends Dispatcher<{ guid: string }, channels.LocalUtilsChannel> implements channels.LocalUtilsChannel {
   _type_LocalUtils: boolean;
-  private _harCache = new Map<string, Map<string, Log>>();
+  private _harBakends = new Map<string, HarBackend>();
 
   constructor(scope: DispatcherScope) {
     super(scope, { guid: 'localUtils@' + createGuid() }, 'LocalUtils', {});
@@ -89,61 +91,171 @@ export class LocalUtilsDispatcher extends Dispatcher<{ guid: string }, channels.
     return promise;
   }
 
-  async harFindEntry(params: channels.LocalUtilsHarFindEntryParams, metadata?: channels.Metadata): Promise<channels.LocalUtilsHarFindEntryResult> {
-    try {
-      let cache = this._harCache.get(params.cacheKey);
-      if (!cache) {
-        cache = new Map();
-        this._harCache.set(params.cacheKey, cache);
-      }
-
-      let harLog = cache.get(params.harFile);
-      if (!harLog) {
-        const contents = await fs.promises.readFile(params.harFile, 'utf-8');
-        harLog = JSON.parse(contents).log as Log;
-        cache.set(params.harFile, harLog);
-      }
-
-      const visited = new Set<Entry>();
-      let url = params.url;
-      let method = params.method;
-      while (true) {
-        const entry = harLog.entries.find(entry => entry.request.url === url && entry.request.method === method);
-        if (!entry)
-          throw new Error(`No entry matching ${params.url}`);
-        if (visited.has(entry))
-          throw new Error(`Found redirect cycle for ${params.url}`);
-        visited.add(entry);
-
-        const locationHeader = entry.response.headers.find(h => h.name.toLowerCase() === 'location');
-        if (redirectStatus.includes(entry.response.status) && locationHeader) {
-          const locationURL = new URL(locationHeader.value, url);
-          url = locationURL.toString();
-          if ((entry.response.status === 301 || entry.response.status === 302) && method === 'POST' ||
-              entry.response.status === 303 && !['GET', 'HEAD'].includes(method)) {
-            // HTTP-redirect fetch step 13 (https://fetch.spec.whatwg.org/#http-redirect-fetch)
-            method = 'GET';
-          }
-          continue;
-        }
-
-        let base64body: string | undefined;
-        if (params.needBody && entry.response.content && entry.response.content.text !== undefined) {
-          if (entry.response.content.encoding === 'base64')
-            base64body = entry.response.content.text;
-          else
-            base64body = Buffer.from(entry.response.content.text, 'utf8').toString('base64');
-        }
-        return { status: entry.response.status, headers: entry.response.headers, body: base64body };
-      }
-    } catch (e) {
-      return { error: `Error reading HAR file ${params.harFile}: ` + e.message };
+  async harOpen(params: channels.LocalUtilsHarOpenParams, metadata?: channels.Metadata): Promise<channels.LocalUtilsHarOpenResult> {
+    let harBackend: HarBackend;
+    if (params.file.endsWith('.zip')) {
+      const zipFile = new ZipFile(params.file);
+      const entryNames = await zipFile.entries();
+      const harEntryName = entryNames.find(e => e.endsWith('.har'));
+      if (!harEntryName)
+        return { error: 'Specified archive does not have a .har file' };
+      const har = await zipFile.read(harEntryName);
+      const harFile = JSON.parse(har.toString()) as HARFile;
+      harBackend = new HarBackend(harFile, null, zipFile);
+    } else {
+      const harFile = JSON.parse(await fs.promises.readFile(params.file, 'utf-8')) as HARFile;
+      harBackend = new HarBackend(harFile, path.dirname(params.file), null);
     }
+    this._harBakends.set(harBackend.id, harBackend);
+    return { harId: harBackend.id };
   }
 
-  async harClearCache(params: channels.LocalUtilsHarClearCacheParams, metadata?: channels.Metadata): Promise<void> {
-    this._harCache.delete(params.cacheKey);
+  async harLookup(params: channels.LocalUtilsHarLookupParams, metadata?: channels.Metadata): Promise<channels.LocalUtilsHarLookupResult> {
+    const harBackend = this._harBakends.get(params.harId);
+    if (!harBackend)
+      return { action: 'error', message: `Internal error: har was not opened` };
+    return await harBackend.lookup(params.url, params.method, params.headers, params.postData ? Buffer.from(params.postData, 'base64') : undefined, params.isNavigationRequest);
+  }
+
+  async harClose(params: channels.LocalUtilsHarCloseParams, metadata?: channels.Metadata): Promise<void> {
+    const harBackend = this._harBakends.get(params.harId);
+    if (harBackend) {
+      this._harBakends.delete(harBackend.id);
+      harBackend.dispose();
+    }
   }
 }
 
 const redirectStatus = [301, 302, 303, 307, 308];
+
+class HarBackend {
+  readonly id = createGuid();
+  private _harFile: HARFile;
+  private _zipFile: ZipFile | null;
+  private _baseDir: string | null;
+
+  constructor(harFile: HARFile, baseDir: string | null, zipFile: ZipFile | null) {
+    this._harFile = harFile;
+    this._baseDir = baseDir;
+    this._zipFile = zipFile;
+  }
+
+  async lookup(url: string, method: string, headers: HeadersArray, postData: Buffer | undefined, isNavigationRequest: boolean): Promise<{
+      action: 'error' | 'redirect' | 'fulfill' | 'noentry',
+      message?: string,
+      redirectURL?: string,
+      status?: number,
+      headers?: HeadersArray,
+      body?: string,
+      base64Encoded?: boolean }> {
+    let entry;
+    try {
+      entry = await this._harFindResponse(url, method, headers, postData);
+    } catch (e) {
+      return { action: 'error', message: 'HAR error: ' + e.message };
+    }
+
+    if (!entry)
+      return { action: 'noentry' };
+
+    // If navigation is being redirected, restart it with the final url to ensure the document's url changes.
+    if (entry.request.url !== url && isNavigationRequest)
+      return { action: 'redirect', redirectURL: entry.request.url };
+
+    const response = entry.response;
+    try {
+      const buffer = await this._loadContent(response.content);
+      return {
+        action: 'fulfill',
+        status: response.status,
+        headers: response.headers,
+        body: buffer.toString('base64'),
+      };
+    } catch (e) {
+      return { action: 'error', message: e.message };
+    }
+  }
+
+  private async _loadContent(content: { text?: string, encoding?: string, _sha1?: string }): Promise<Buffer> {
+    const sha1 = content._sha1;
+    let buffer: Buffer;
+    if (sha1) {
+      if (this._zipFile)
+        buffer = await this._zipFile.read(sha1);
+      else
+        buffer = await fs.promises.readFile(path.resolve(this._baseDir!, sha1));
+    } else {
+      buffer = Buffer.from(content.text || '', content.encoding === 'base64' ? 'base64' : 'utf-8');
+    }
+    return buffer;
+  }
+
+  private async _harFindResponse(url: string, method: string, headers: HeadersArray, postData: Buffer | undefined): Promise<HAREntry | undefined> {
+    const harLog = this._harFile.log;
+    const visited = new Set<HAREntry>();
+    while (true) {
+      const entries: HAREntry[] = [];
+      for (const candidate of harLog.entries) {
+        if (candidate.request.url !== url || candidate.request.method !== method)
+          continue;
+        if (method === 'POST' && postData && candidate.request.postData) {
+          const buffer = await this._loadContent(candidate.request.postData);
+          if (!buffer.equals(postData))
+            continue;
+        }
+        entries.push(candidate);
+      }
+
+      if (!entries.length)
+        return;
+
+      let entry = entries[0];
+
+      // Disambiguate using headers - then one with most matching headers wins.
+      if (entries.length > 1) {
+        const list: { candidate: HAREntry, matchingHeaders: number }[] = [];
+        for (const candidate of entries) {
+          const matchingHeaders = countMatchingHeaders(candidate.request.headers, headers);
+          list.push({ candidate, matchingHeaders });
+        }
+        list.sort((a, b) => b.matchingHeaders - a.matchingHeaders);
+        entry = list[0].candidate;
+      }
+
+      if (visited.has(entry))
+        throw new Error(`Found redirect cycle for ${url}`);
+
+      visited.add(entry);
+
+      // Follow redirects.
+      const locationHeader = entry.response.headers.find(h => h.name.toLowerCase() === 'location');
+      if (redirectStatus.includes(entry.response.status) && locationHeader) {
+        const locationURL = new URL(locationHeader.value, url);
+        url = locationURL.toString();
+        if ((entry.response.status === 301 || entry.response.status === 302) && method === 'POST' ||
+          entry.response.status === 303 && !['GET', 'HEAD'].includes(method)) {
+          // HTTP-redirect fetch step 13 (https://fetch.spec.whatwg.org/#http-redirect-fetch)
+          method = 'GET';
+        }
+        continue;
+      }
+
+      return entry;
+    }
+  }
+
+  dispose() {
+    this._zipFile?.close();
+  }
+}
+
+function countMatchingHeaders(harHeaders: HARHeader[], headers: HeadersArray): number {
+  const set = new Set(headers.map(h => h.name.toLowerCase() + ':' + h.value));
+  let matches = 0;
+  for (const h of harHeaders) {
+    if (set.has(h.name.toLowerCase() + ':' + h.value))
+      ++matches;
+  }
+  return matches;
+}
+

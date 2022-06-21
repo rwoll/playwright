@@ -154,8 +154,8 @@ export function createScheme(tChannel: (name: string) => Validator): Scheme {
     value: tOptional(tType('SerializedValue')),
   });
   scheme.RecordHarOptions = tObject({
-    omitContent: tOptional(tBoolean),
     path: tString,
+    content: tOptional(tEnum(['embed', 'attach', 'omit'])),
     urlGlob: tOptional(tString),
     urlRegexSource: tOptional(tString),
     urlRegexFlags: tOptional(tString),
@@ -205,15 +205,19 @@ export function createScheme(tChannel: (name: string) => Validator): Scheme {
     zipFile: tString,
     entries: tArray(tType('NameValue')),
   });
-  scheme.LocalUtilsHarFindEntryParams = tObject({
-    cacheKey: tString,
-    harFile: tString,
+  scheme.LocalUtilsHarOpenParams = tObject({
+    file: tString,
+  });
+  scheme.LocalUtilsHarLookupParams = tObject({
+    harId: tString,
     url: tString,
     method: tString,
-    needBody: tBoolean,
+    headers: tArray(tType('NameValue')),
+    postData: tOptional(tString),
+    isNavigationRequest: tBoolean,
   });
-  scheme.LocalUtilsHarClearCacheParams = tObject({
-    cacheKey: tString,
+  scheme.LocalUtilsHarCloseParams = tObject({
+    harId: tString,
   });
   scheme.RootInitializeParams = tObject({
     sdkLanguage: tString,
@@ -1179,6 +1183,7 @@ export function createScheme(tChannel: (name: string) => Validator): Scheme {
   scheme.RequestRawRequestHeadersParams = tOptional(tObject({}));
   scheme.RouteAbortParams = tObject({
     errorCode: tOptional(tString),
+    redirectAbortedNavigationToUrl: tOptional(tString),
   });
   scheme.RouteContinueParams = tObject({
     url: tOptional(tString),

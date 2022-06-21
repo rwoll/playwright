@@ -56,11 +56,6 @@ export type SetNetworkCookieParam = {
   sameSite?: 'Strict' | 'Lax' | 'None'
 };
 
-type RouteHAR = {
-  fallback?: 'abort' | 'continue' | 'throw';
-  path: string;
-};
-
 type FallbackOverrides = {
   url?: string;
   method?: string;
@@ -295,58 +290,31 @@ export class Route extends ChannelOwner<channels.RouteChannel> implements api.Ro
   }
 
   async abort(errorCode?: string) {
+    await this._abort(errorCode);
+  }
+
+  async _abort(errorCode?: string, redirectAbortedNavigationToUrl?: string) {
     this._checkNotHandled();
-    await this._raceWithTargetClose(this._channel.abort({ errorCode }));
+    await this._raceWithTargetClose(this._channel.abort({ errorCode, redirectAbortedNavigationToUrl }));
     this._reportHandled(true);
   }
 
-  async fulfill(options: { response?: api.APIResponse, status?: number, headers?: Headers, contentType?: string, body?: string | Buffer, path?: string, har?: RouteHAR } = {}) {
+  async fulfill(options: { response?: api.APIResponse, status?: number, headers?: Headers, contentType?: string, body?: string | Buffer, path?: string } = {}) {
     this._checkNotHandled();
     await this._wrapApiCall(async () => {
-      const fallback = await this._innerFulfill(options);
-      switch (fallback) {
-        case 'abort': await this.abort(); break;
-        case 'continue': await this.continue(); break;
-        case 'done': this._reportHandled(true); break;
-      }
+      await this._innerFulfill(options);
+      this._reportHandled(true);
     });
   }
 
-  private async _innerFulfill(options: { response?: api.APIResponse, status?: number, headers?: Headers, contentType?: string, body?: string | Buffer, path?: string, har?: RouteHAR } = {}): Promise<'abort' | 'continue' | 'done'> {
+  private async _innerFulfill(options: { response?: api.APIResponse, status?: number, headers?: Headers, contentType?: string, body?: string | Buffer, path?: string } = {}): Promise<void> {
     let fetchResponseUid;
     let { status: statusOption, headers: headersOption, body } = options;
 
-    if (options.har && options.response)
-      throw new Error(`At most one of "har" and "response" options should be present`);
-
-    if (options.har) {
-      const fallback = options.har.fallback ?? 'abort';
-      if (!['abort', 'continue', 'throw'].includes(fallback))
-        throw new Error(`har.fallback: expected one of "abort", "continue" or "throw", received "${fallback}"`);
-      const entry = await this._connection.localUtils()._channel.harFindEntry({
-        cacheKey: this.request()._context()._guid,
-        harFile: options.har.path,
-        url: this.request().url(),
-        method: this.request().method(),
-        needBody: body === undefined,
-      });
-      if (entry.error) {
-        if (fallback === 'throw')
-          throw new Error(entry.error);
-        return fallback;
-      }
-      if (statusOption === undefined)
-        statusOption = entry.status;
-      if (headersOption === undefined && entry.headers)
-        headersOption = headersArrayToObject(entry.headers, false);
-      if (body === undefined && entry.body !== undefined)
-        body = Buffer.from(entry.body, 'base64');
-    }
-
-    if (options.response) {
+    if (options.response instanceof APIResponse) {
       statusOption ??= options.response.status();
       headersOption ??= options.response.headers();
-      if (body === undefined && options.path === undefined && options.response instanceof APIResponse) {
+      if (body === undefined && options.path === undefined) {
         if (options.response._request._connection === this._connection)
           fetchResponseUid = (options.response as APIResponse)._fetchUid();
         else
@@ -387,7 +355,6 @@ export class Route extends ChannelOwner<channels.RouteChannel> implements api.Ro
       isBase64,
       fetchResponseUid
     }));
-    return 'done';
   }
 
   async continue(options: FallbackOverrides = {}) {

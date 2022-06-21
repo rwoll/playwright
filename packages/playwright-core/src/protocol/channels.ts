@@ -264,8 +264,8 @@ export type SerializedError = {
 };
 
 export type RecordHarOptions = {
-  omitContent?: boolean,
   path: string,
+  content?: 'embed' | 'attach' | 'omit',
   urlGlob?: string,
   urlRegexSource?: string,
   urlRegexFlags?: string,
@@ -378,8 +378,9 @@ export interface LocalUtilsEventTarget {
 export interface LocalUtilsChannel extends LocalUtilsEventTarget, Channel {
   _type_LocalUtils: boolean;
   zip(params: LocalUtilsZipParams, metadata?: Metadata): Promise<LocalUtilsZipResult>;
-  harFindEntry(params: LocalUtilsHarFindEntryParams, metadata?: Metadata): Promise<LocalUtilsHarFindEntryResult>;
-  harClearCache(params: LocalUtilsHarClearCacheParams, metadata?: Metadata): Promise<LocalUtilsHarClearCacheResult>;
+  harOpen(params: LocalUtilsHarOpenParams, metadata?: Metadata): Promise<LocalUtilsHarOpenResult>;
+  harLookup(params: LocalUtilsHarLookupParams, metadata?: Metadata): Promise<LocalUtilsHarLookupResult>;
+  harClose(params: LocalUtilsHarCloseParams, metadata?: Metadata): Promise<LocalUtilsHarCloseResult>;
 }
 export type LocalUtilsZipParams = {
   zipFile: string,
@@ -389,29 +390,42 @@ export type LocalUtilsZipOptions = {
 
 };
 export type LocalUtilsZipResult = void;
-export type LocalUtilsHarFindEntryParams = {
-  cacheKey: string,
-  harFile: string,
+export type LocalUtilsHarOpenParams = {
+  file: string,
+};
+export type LocalUtilsHarOpenOptions = {
+
+};
+export type LocalUtilsHarOpenResult = {
+  harId?: string,
+  error?: string,
+};
+export type LocalUtilsHarLookupParams = {
+  harId: string,
   url: string,
   method: string,
-  needBody: boolean,
+  headers: NameValue[],
+  postData?: string,
+  isNavigationRequest: boolean,
 };
-export type LocalUtilsHarFindEntryOptions = {
-
+export type LocalUtilsHarLookupOptions = {
+  postData?: string,
 };
-export type LocalUtilsHarFindEntryResult = {
-  error?: string,
+export type LocalUtilsHarLookupResult = {
+  action: 'error' | 'redirect' | 'fulfill' | 'noentry',
+  message?: string,
+  redirectURL?: string,
   status?: number,
   headers?: NameValue[],
-  body?: Binary,
+  body?: string,
 };
-export type LocalUtilsHarClearCacheParams = {
-  cacheKey: string,
+export type LocalUtilsHarCloseParams = {
+  harId: string,
 };
-export type LocalUtilsHarClearCacheOptions = {
+export type LocalUtilsHarCloseOptions = {
 
 };
-export type LocalUtilsHarClearCacheResult = void;
+export type LocalUtilsHarCloseResult = void;
 
 export interface LocalUtilsEvents {
 }
@@ -1356,11 +1370,9 @@ export interface PageEventTarget {
   on(event: 'crash', callback: (params: PageCrashEvent) => void): this;
   on(event: 'dialog', callback: (params: PageDialogEvent) => void): this;
   on(event: 'download', callback: (params: PageDownloadEvent) => void): this;
-  on(event: 'domcontentloaded', callback: (params: PageDomcontentloadedEvent) => void): this;
   on(event: 'fileChooser', callback: (params: PageFileChooserEvent) => void): this;
   on(event: 'frameAttached', callback: (params: PageFrameAttachedEvent) => void): this;
   on(event: 'frameDetached', callback: (params: PageFrameDetachedEvent) => void): this;
-  on(event: 'load', callback: (params: PageLoadEvent) => void): this;
   on(event: 'pageError', callback: (params: PagePageErrorEvent) => void): this;
   on(event: 'route', callback: (params: PageRouteEvent) => void): this;
   on(event: 'video', callback: (params: PageVideoEvent) => void): this;
@@ -1421,7 +1433,6 @@ export type PageDownloadEvent = {
   suggestedFilename: string,
   artifact: ArtifactChannel,
 };
-export type PageDomcontentloadedEvent = {};
 export type PageFileChooserEvent = {
   element: ElementHandleChannel,
   isMultiple: boolean,
@@ -1432,7 +1443,6 @@ export type PageFrameAttachedEvent = {
 export type PageFrameDetachedEvent = {
   frame: FrameChannel,
 };
-export type PageLoadEvent = {};
 export type PagePageErrorEvent = {
   error: SerializedError,
 };
@@ -1861,11 +1871,9 @@ export interface PageEvents {
   'crash': PageCrashEvent;
   'dialog': PageDialogEvent;
   'download': PageDownloadEvent;
-  'domcontentloaded': PageDomcontentloadedEvent;
   'fileChooser': PageFileChooserEvent;
   'frameAttached': PageFrameAttachedEvent;
   'frameDetached': PageFrameDetachedEvent;
-  'load': PageLoadEvent;
   'pageError': PagePageErrorEvent;
   'route': PageRouteEvent;
   'video': PageVideoEvent;
@@ -3157,9 +3165,11 @@ export interface RouteChannel extends RouteEventTarget, Channel {
 }
 export type RouteAbortParams = {
   errorCode?: string,
+  redirectAbortedNavigationToUrl?: string,
 };
 export type RouteAbortOptions = {
   errorCode?: string,
+  redirectAbortedNavigationToUrl?: string,
 };
 export type RouteAbortResult = void;
 export type RouteContinueParams = {

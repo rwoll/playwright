@@ -54,9 +54,15 @@ export type BrowserContextOptions = Omit<channels.BrowserNewContextOptions, 'vie
   videosPath?: string,
   videoSize?: Size,
   storageState?: string | SetStorageState,
+  har?: {
+    path: string;
+    fallback?: 'abort'|'continue';
+    urlFilter?: string|RegExp;
+  },
   recordHar?: {
     path: string,
     omitContent?: boolean,
+    content?: 'omit' | 'embed' | 'attach',
     urlFilter?: string | RegExp,
   },
 };

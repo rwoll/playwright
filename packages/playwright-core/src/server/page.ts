@@ -20,6 +20,7 @@ import * as frames from './frames';
 import * as input from './input';
 import * as js from './javascript';
 import * as network from './network';
+import type * as channels from '../protocol/channels';
 import type { ScreenshotOptions } from './screenshotter';
 import { Screenshotter, validateScreenshotOptions } from './screenshotter';
 import { TimeoutSettings } from '../common/timeoutSettings';
@@ -86,7 +87,7 @@ export interface PageDelegate {
   setScreencastOptions(options: { width: number, height: number, quality: number } | null): Promise<void>;
 
   getAccessibilityTree(needle?: dom.ElementHandle): Promise<{tree: accessibility.AXNode, needle: accessibility.AXNode | null}>;
-  pdf?: (options?: types.PDFOptions) => Promise<Buffer>;
+  pdf?: (options: channels.PagePdfParams) => Promise<Buffer>;
   coverage?: () => any;
 
   // Work around WebKit's raf issues on Windows.
@@ -127,14 +128,12 @@ export class Page extends SdkObject {
     Dialog: 'dialog',
     Download: 'download',
     FileChooser: 'filechooser',
-    DOMContentLoaded: 'domcontentloaded',
     // Can't use just 'error' due to node.js special treatment of error events.
     // @see https://nodejs.org/api/events.html#events_error_events
     PageError: 'pageerror',
     FrameAttached: 'frameattached',
     FrameDetached: 'framedetached',
     InternalFrameNavigatedToNewDocument: 'internalframenavigatedtonewdocument',
-    Load: 'load',
     ScreencastFrame: 'screencastframe',
     Video: 'video',
     WebSocket: 'websocket',
@@ -160,7 +159,7 @@ export class Page extends SdkObject {
   readonly _frameManager: frames.FrameManager;
   readonly accessibility: accessibility.Accessibility;
   private _workers = new Map<string, Worker>();
-  readonly pdf: ((options?: types.PDFOptions) => Promise<Buffer>) | undefined;
+  readonly pdf: ((options: channels.PagePdfParams) => Promise<Buffer>) | undefined;
   readonly coverage: any;
   _clientRequestInterceptor: network.RouteHandler | undefined;
   _serverRequestInterceptor: network.RouteHandler | undefined;
@@ -349,7 +348,7 @@ export class Page extends SdkObject {
 
   async reload(metadata: CallMetadata, options: types.NavigateOptions): Promise<network.Response | null> {
     const controller = new ProgressController(metadata, this);
-    return controller.run(progress => this.mainFrame().raceNavigationAction(async () => {
+    return controller.run(progress => this.mainFrame().raceNavigationAction(progress, options, async () => {
       // Note: waitForNavigation may fail before we get response to reload(),
       // so we should await it immediately.
       const [response] = await Promise.all([
@@ -363,7 +362,7 @@ export class Page extends SdkObject {
 
   async goBack(metadata: CallMetadata, options: types.NavigateOptions): Promise<network.Response | null> {
     const controller = new ProgressController(metadata, this);
-    return controller.run(progress => this.mainFrame().raceNavigationAction(async () => {
+    return controller.run(progress => this.mainFrame().raceNavigationAction(progress, options, async () => {
       // Note: waitForNavigation may fail before we get response to goBack,
       // so we should catch it immediately.
       let error: Error | undefined;
@@ -384,7 +383,7 @@ export class Page extends SdkObject {
 
   async goForward(metadata: CallMetadata, options: types.NavigateOptions): Promise<network.Response | null> {
     const controller = new ProgressController(metadata, this);
-    return controller.run(progress => this.mainFrame().raceNavigationAction(async () => {
+    return controller.run(progress => this.mainFrame().raceNavigationAction(progress, options, async () => {
       // Note: waitForNavigation may fail before we get response to goForward,
       // so we should catch it immediately.
       let error: Error | undefined;

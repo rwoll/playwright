@@ -15,6 +15,10 @@
  */
 
 // see http://www.softwareishard.com/blog/har-12-spec/
+export type HARFile = {
+  log: Log;
+};
+
 export type Log = {
   version: string;
   creator: Creator;

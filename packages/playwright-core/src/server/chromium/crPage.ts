@@ -23,13 +23,14 @@ import { rewriteErrorMessage } from '../../utils/stackTrace';
 import { assert, createGuid, headersArrayToObject } from '../../utils';
 import * as dialog from '../dialog';
 import * as dom from '../dom';
-import type * as frames from '../frames';
+import * as frames from '../frames';
 import { helper } from '../helper';
 import * as network from '../network';
 import type { PageBinding, PageDelegate } from '../page';
 import { Page, Worker } from '../page';
 import type { Progress } from '../progress';
 import type * as types from '../types';
+import type * as channels from '../../protocol/channels';
 import { getAccessibilityTree } from './crAccessibility';
 import { CRBrowserContext } from './crBrowser';
 import type { CRSession } from './crConnection';
@@ -356,7 +357,7 @@ export class CRPage implements PageDelegate {
     await this._mainFrameSession._client.send('Page.enable').catch(e => {});
   }
 
-  async pdf(options?: types.PDFOptions): Promise<Buffer> {
+  async pdf(options: channels.PagePdfParams): Promise<Buffer> {
     return this._pdf.generate(options);
   }
 
@@ -587,7 +588,7 @@ class FrameSession {
   async _navigate(frame: frames.Frame, url: string, referrer: string | undefined): Promise<frames.GotoResult> {
     const response = await this._client.send('Page.navigate', { url, referrer, frameId: frame._id });
     if (response.errorText)
-      throw new Error(`${response.errorText} at ${url}`);
+      throw new frames.NavigationAbortedError(response.loaderId, `${response.errorText} at ${url}`);
     return { newDocumentId: response.loaderId };
   }
 
