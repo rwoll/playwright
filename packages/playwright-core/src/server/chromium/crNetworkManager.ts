@@ -392,7 +392,7 @@ export class CRNetworkManager {
     this._requestIdToRequest.delete(request._requestId);
     if (request._interceptionId)
       this._attemptedAuthentications.delete(request._interceptionId);
-      (this._page?._frameManager || this._serviceWorker)!.reportRequestFinished(request.request, response);
+    (this._page?._frameManager || this._serviceWorker)!.reportRequestFinished(request.request, response);
   }
 
   _onLoadingFailed(workerFrame: frames.Frame | undefined, event: Protocol.Network.loadingFailedPayload) {
