@@ -40,8 +40,6 @@ test('should create a worker from service worker with noop routing', async ({ co
 });
 
 test('serviceWorker(), and fromServiceWorker() work', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   const [worker, html, main, inWorker] = await Promise.all([
     context.waitForEvent('serviceworker'),
     context.waitForEvent('request', r => r.url().endsWith('/sw.html')),
@@ -83,8 +81,6 @@ test('serviceWorker(), and fromServiceWorker() work', async ({ context, page, se
 });
 
 test('should intercept service worker requests (main and within)', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   await context.route('**/request-from-within-worker', route =>
     route.fulfill({
       contentType: 'application/json',
@@ -112,9 +108,6 @@ test('should intercept service worker requests (main and within)', async ({ cont
 });
 
 test('should report failure (due to content-type) of main service worker request', async ({ server, page, context, browserMajorVersion }) => {
-  test.fixme(true, 'crbug.com/1318727, Fixed in https://chromium-review.googlesource.com/c/chromium/src/+/3689949');
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   server.setRoute('/serviceworkers/fetch/sw.js', (req, res) => {
     res.writeHead(200, 'OK', { 'Content-Type': 'text/html' });
     res.write(`console.log('hi from sw');`);
@@ -130,9 +123,6 @@ test('should report failure (due to content-type) of main service worker request
 });
 
 test('should report failure (due to redirect) of main service worker request', async ({ server, page, context, browserMajorVersion }) => {
-  test.fixme(true, 'crbug.com/1318727, Fixed in https://chromium-review.googlesource.com/c/chromium/src/+/3689949');
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   server.setRedirect('/serviceworkers/empty/sw.js', '/dev/null');
   const [, main] = await Promise.all([
     server.waitForRequest('/serviceworkers/empty/sw.js'),
@@ -145,8 +135,6 @@ test('should report failure (due to redirect) of main service worker request', a
 });
 
 test('should intercept service worker importScripts', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   await context.route('**/import.js', route =>
     route.fulfill({
       contentType: 'text/javascript',
@@ -175,8 +163,6 @@ test('should intercept service worker importScripts', async ({ context, page, se
 });
 
 test('should report intercepted service worker requests in HAR', async ({ pageWithHar, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   const { context, page, getLog } = await pageWithHar();
   await context.route('**/request-from-within-worker', route =>
     route.fulfill({
@@ -224,8 +210,6 @@ test('should report intercepted service worker requests in HAR', async ({ pageWi
 });
 
 test('should intercept only serviceworker request, not page', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   await context.route('**/data.json', async route => {
     if (route.request().serviceWorker()) {
       return route.fulfill({
@@ -250,8 +234,6 @@ test('should intercept only serviceworker request, not page', async ({ context, 
 });
 
 test('setOffline', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   const [worker] = await Promise.all([
     context.waitForEvent('serviceworker'),
     page.goto(server.PREFIX + '/serviceworkers/fetch/sw.html')
@@ -268,8 +250,6 @@ test('setOffline', async ({ context, page, server, browserMajorVersion }) => {
 
 
 test('setExtraHTTPHeaders', async ({ context, page, server, browserMajorVersion }) => {
-  test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
   const [worker] = await Promise.all([
     context.waitForEvent('serviceworker'),
     page.goto(server.PREFIX + '/serviceworkers/fetch/sw.html')
@@ -287,8 +267,6 @@ test.describe('http credentials', () => {
   test.use({ httpCredentials: { username: 'user',  password: 'pass' } });
 
   test('httpCredentials', async ({ context, page, server, browserMajorVersion }) => {
-    test.skip(browserMajorVersion < 103, 'Requires fix from https://chromium-review.googlesource.com/c/chromium/src/+/3544685');
-
     server.setAuth('/serviceworkers/fetch/sw.html', 'user', 'pass');
     server.setAuth('/empty.html', 'user', 'pass');
     const [worker] = await Promise.all([
