@@ -105,10 +105,10 @@ export class Request extends SdkObject {
   private _postData: Buffer | null;
   readonly _headers: types.HeadersArray;
   private _headersMap = new Map<string, string>();
-  private _rawRequestHeadersPromise: ManualPromise<types.HeadersArray> | undefined;
   readonly _frame: frames.Frame | null = null;
   readonly _serviceWorker: pages.Worker | null = null;
   readonly _context: contexts.BrowserContext;
+  private _rawRequestHeadersPromise = new ManualPromise<types.HeadersArray>();
   private _waitForResponsePromise = new ManualPromise<Response | null>();
   _responseEndTiming = -1;
   readonly responseSize: ResponseSize = { encodedBodySize: 0, transferSize: 0, responseHeadersSize: 0 };
@@ -137,6 +137,8 @@ export class Request extends SdkObject {
   _setFailureText(failureText: string) {
     this._failureText = failureText;
     this._waitForResponsePromise.resolve(null);
+    // If we didn't get raw headers, declare them equal to provisional.
+    this.setRawRequestHeaders(null);
   }
 
   url(): string {
@@ -163,22 +165,13 @@ export class Request extends SdkObject {
     return this._headersMap.get(name);
   }
 
-  setWillReceiveExtraHeaders() {
-    if (!this._rawRequestHeadersPromise)
-      this._rawRequestHeadersPromise = new ManualPromise();
-  }
-
-  setRawRequestHeaders(headers: types.HeadersArray) {
-    if (!this._rawRequestHeadersPromise)
-      this._rawRequestHeadersPromise = new ManualPromise();
-    this._rawRequestHeadersPromise!.resolve(headers);
+  // "null" means no raw headers available - we'll use provisional headers as raw headers.
+  setRawRequestHeaders(headers: types.HeadersArray | null) {
+    if (!this._rawRequestHeadersPromise.isDone())
+      this._rawRequestHeadersPromise.resolve(headers || this._headers);
   }
 
   async rawRequestHeaders(): Promise<NameValue[]> {
-    return this._rawRequestHeadersPromise || Promise.resolve(this._headers);
-  }
-
-  rawRequestHeadersPromise(): Promise<types.HeadersArray> | undefined {
     return this._rawRequestHeadersPromise;
   }
 
@@ -232,7 +225,7 @@ export class Request extends SdkObject {
     headersSize += this.method().length;
     headersSize += (new URL(this.url())).pathname.length;
     headersSize += 8; // httpVersion
-    const headers = this.rawRequestHeadersPromise() ? await this.rawRequestHeadersPromise()! : this._headers;
+    const headers = await this.rawRequestHeaders();
     for (const header of headers)
       headersSize += header.name.length + header.value.length + 4; // 4 = ': ' + '\r\n'
     return headersSize;
@@ -254,11 +247,15 @@ export class Route extends SdkObject {
     return this._request;
   }
 
-  async abort(errorCode: string = 'failed', redirectAbortedNavigationToUrl?: string) {
+  async abort(errorCode: string = 'failed') {
     this._startHandling();
-    if (redirectAbortedNavigationToUrl)
-      this._request.frame().redirectNavigationAfterAbort(redirectAbortedNavigationToUrl, this._request._documentId!);
     await this._delegate.abort(errorCode);
+  }
+
+  async redirectNavigationRequest(url: string) {
+    this._startHandling();
+    assert(this._request.isNavigationRequest());
+    this._request.frame()!.redirectNavigation(url, this._request._documentId!, this._request.headerValue('referer'));
   }
 
   async fulfill(overrides: channels.RouteFulfillParams) {
@@ -349,11 +346,11 @@ export type RemoteAddr = {
 };
 
 export type SecurityDetails = {
-    protocol?: string;
-    subjectName?: string;
-    issuer?: string;
-    validFrom?: number;
-    validTo?: number;
+  protocol?: string;
+  subjectName?: string;
+  issuer?: string;
+  validFrom?: number;
+  validTo?: number;
 };
 
 export class Response extends SdkObject {
@@ -369,7 +366,7 @@ export class Response extends SdkObject {
   private _timing: ResourceTiming;
   private _serverAddrPromise = new ManualPromise<RemoteAddr | undefined>();
   private _securityDetailsPromise = new ManualPromise<SecurityDetails | undefined>();
-  private _rawResponseHeadersPromise: ManualPromise<types.HeadersArray> | undefined;
+  private _rawResponseHeadersPromise = new ManualPromise<types.HeadersArray>();
   private _httpVersion: string | undefined;
   private _fromServiceWorker: boolean;
 
@@ -398,6 +395,9 @@ export class Response extends SdkObject {
   }
 
   _requestFinished(responseEndTiming: number) {
+    // If we didn't get raw headers, declare them equal to provisional.
+    this.setRawResponseHeaders(null);
+    this._request.setRawRequestHeaders(null);
     this._request._responseEndTiming = Math.max(responseEndTiming, this._timing.responseStart);
     this._finishedPromise.resolve();
   }
@@ -427,18 +427,13 @@ export class Response extends SdkObject {
   }
 
   async rawResponseHeaders(): Promise<NameValue[]> {
-    return this._rawResponseHeadersPromise || Promise.resolve(this._headers);
+    return this._rawResponseHeadersPromise;
   }
 
-  setWillReceiveExtraHeaders() {
-    this._request.setWillReceiveExtraHeaders();
-    this._rawResponseHeadersPromise = new ManualPromise();
-  }
-
-  setRawResponseHeaders(headers: types.HeadersArray) {
-    if (!this._rawResponseHeadersPromise)
-      this._rawResponseHeadersPromise = new ManualPromise();
-    this._rawResponseHeadersPromise!.resolve(headers);
+  // "null" means no raw headers available - we'll use provisional headers as raw headers.
+  setRawResponseHeaders(headers: types.HeadersArray | null) {
+    if (!this._rawResponseHeadersPromise.isDone())
+      this._rawResponseHeadersPromise.resolve(headers || this._headers);
   }
 
   timing(): ResourceTiming {

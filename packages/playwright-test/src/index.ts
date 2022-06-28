@@ -25,6 +25,7 @@ export { expect } from './expect';
 export const _baseTest: TestType<{}, {}> = rootTestType.test;
 export { addRunnerPlugin as _addRunnerPlugin } from './plugins';
 import * as outOfProcess from 'playwright-core/lib/outofprocess';
+import type { TestInfoImpl } from './testInfo';
 
 if ((process as any)['__pw_initiator__']) {
   const originalStackTraceLimit = Error.stackTraceLimit;
@@ -141,7 +142,6 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
   deviceScaleFactor: [ undefined, { option: true } ],
   extraHTTPHeaders: [ undefined, { option: true } ],
   geolocation: [ undefined, { option: true } ],
-  har: [undefined, { option: true }],
   hasTouch: [ undefined, { option: true } ],
   httpCredentials: [ undefined, { option: true } ],
   ignoreHTTPSErrors: [ undefined, { option: true } ],
@@ -169,7 +169,6 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
     colorScheme,
     deviceScaleFactor,
     extraHTTPHeaders,
-    har,
     hasTouch,
     geolocation,
     httpCredentials,
@@ -201,8 +200,6 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
       options.extraHTTPHeaders = extraHTTPHeaders;
     if (geolocation !== undefined)
       options.geolocation = geolocation;
-    if (har !== undefined)
-      options.har = har;
     if (hasTouch !== undefined)
       options.hasTouch = hasTouch;
     if (httpCredentials !== undefined)
@@ -253,6 +250,7 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
     const temporaryTraceFiles: string[] = [];
     const temporaryScreenshots: string[] = [];
     const createdContexts = new Set<BrowserContext>();
+    const testInfoImpl = testInfo as TestInfoImpl;
 
     const createInstrumentationListener = (context?: BrowserContext) => {
       return {
@@ -264,9 +262,8 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
             context?.setDefaultNavigationTimeout(0);
             context?.setDefaultTimeout(0);
           }
-          const testInfoImpl = testInfo as any;
           const step = testInfoImpl._addStep({
-            location: stackTrace?.frames[0],
+            location: stackTrace?.frames[0] as any,
             category: 'pw:api',
             title: apiCall,
             canHaveChildren: false,
@@ -324,16 +321,29 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
       }
     };
 
+    const screenshottedSymbol = Symbol('screenshotted');
+    const screenshotPage = async (page: Page) => {
+      if ((page as any)[screenshottedSymbol])
+        return;
+      (page as any)[screenshottedSymbol] = true;
+      const screenshotPath = path.join(_artifactsDir(), createGuid() + '.png');
+      temporaryScreenshots.push(screenshotPath);
+      await page.screenshot({ timeout: 5000, path: screenshotPath }).catch(() => {});
+    };
+
+    const screenshotOnTestFailure = async () => {
+      const contexts: BrowserContext[] = [];
+      for (const browserType of [playwright.chromium, playwright.firefox, playwright.webkit])
+        contexts.push(...(browserType as any)._contexts);
+      await Promise.all(contexts.map(ctx => Promise.all(ctx.pages().map(screenshotPage))));
+    };
+
     const onWillCloseContext = async (context: BrowserContext) => {
       await stopTracing(context.tracing);
       if (screenshot === 'on' || screenshot === 'only-on-failure') {
         // Capture screenshot for now. We'll know whether we have to preserve them
         // after the test finishes.
-        await Promise.all(context.pages().map(async page => {
-          const screenshotPath = path.join(_artifactsDir(), createGuid() + '.png');
-          temporaryScreenshots.push(screenshotPath);
-          await page.screenshot({ timeout: 5000, path: screenshotPath }).catch(() => {});
-        }));
+        await Promise.all(context.pages().map(screenshotPage));
       }
     };
 
@@ -356,6 +366,8 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
       const existingApiRequests: APIRequestContext[] =  Array.from((playwright.request as any)._contexts as Set<APIRequestContext>);
       await Promise.all(existingApiRequests.map(onDidCreateRequestContext));
     }
+    if (screenshot === 'on' || screenshot === 'only-on-failure')
+      testInfoImpl._onTestFailureImmediateCallbacks.set(screenshotOnTestFailure, 'Screenshot on failure');
 
     // 2. Run the test.
     await use();
@@ -395,6 +407,7 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
     const leftoverApiRequests: APIRequestContext[] =  Array.from((playwright.request as any)._contexts as Set<APIRequestContext>);
     (playwright.request as any)._onDidCreateContext = undefined;
     (playwright.request as any)._onWillCloseContext = undefined;
+    testInfoImpl._onTestFailureImmediateCallbacks.delete(screenshotOnTestFailure);
 
     const stopTraceChunk = async (tracing: Tracing): Promise<boolean> => {
       // When we timeout during context.close(), we might end up with context still alive
@@ -413,8 +426,13 @@ export const test = _baseTest.extend<TestFixtures, WorkerFixtures>({
     await Promise.all(leftoverContexts.map(async context => {
       if (!await stopTraceChunk(context.tracing))
         return;
-      if (captureScreenshots)
-        await Promise.all(context.pages().map(page => page.screenshot({ timeout: 5000, path: addScreenshotAttachment() }).catch(() => {})));
+      if (captureScreenshots) {
+        await Promise.all(context.pages().map(async page => {
+          if ((page as any)[screenshottedSymbol])
+            return;
+          await page.screenshot({ timeout: 5000, path: addScreenshotAttachment() }).catch(() => {});
+        }));
+      }
     }).concat(leftoverApiRequests.map(async context => {
       const tracing = (context as any)._tracing as Tracing;
       await stopTraceChunk(tracing);

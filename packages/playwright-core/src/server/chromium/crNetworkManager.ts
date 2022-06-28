@@ -58,7 +58,6 @@ export class CRNetworkManager {
       eventsHelper.addEventListener(session, 'Fetch.authRequired', this._onAuthRequired.bind(this)),
       eventsHelper.addEventListener(session, 'Network.requestWillBeSent', this._onRequestWillBeSent.bind(this, workerFrame)),
       eventsHelper.addEventListener(session, 'Network.requestWillBeSentExtraInfo', this._onRequestWillBeSentExtraInfo.bind(this)),
-      eventsHelper.addEventListener(session, 'Network.requestServedFromCache', this._onRequestServedFromCache.bind(this)),
       eventsHelper.addEventListener(session, 'Network.responseReceived', this._onResponseReceived.bind(this)),
       eventsHelper.addEventListener(session, 'Network.responseReceivedExtraInfo', this._onResponseReceivedExtraInfo.bind(this)),
       eventsHelper.addEventListener(session, 'Network.loadingFinished', this._onLoadingFinished.bind(this)),
@@ -128,8 +127,6 @@ export class CRNetworkManager {
   }
 
   _onRequestWillBeSent(workerFrame: frames.Frame | undefined, event: Protocol.Network.requestWillBeSentPayload) {
-    this._responseExtraInfoTracker.requestWillBeSent(event);
-
     // Request interception doesn't happen for data URLs with Network Service.
     if (this._protocolRequestInterceptionEnabled && !event.request.url.startsWith('data:')) {
       const requestId = event.requestId;
@@ -143,10 +140,6 @@ export class CRNetworkManager {
     } else {
       this._onRequest(workerFrame, event, null);
     }
-  }
-
-  _onRequestServedFromCache(event: Protocol.Network.requestServedFromCachePayload) {
-    this._responseExtraInfoTracker.requestServedFromCache(event);
   }
 
   _onRequestWillBeSentExtraInfo(event: Protocol.Network.requestWillBeSentExtraInfoPayload) {
@@ -169,13 +162,6 @@ export class CRNetworkManager {
   }
 
   _onRequestPaused(workerFrame: frames.Frame | undefined, event: Protocol.Fetch.requestPausedPayload) {
-    if (!event.responseStatusCode && !event.responseErrorReason) {
-      // Request intercepted, deliver signal to the tracker.
-      const request = this._requestIdToRequest.get(event.networkId!);
-      if (request)
-        this._responseExtraInfoTracker.requestPaused(request.request, event);
-    }
-
     if (!event.networkId) {
       // Fetch without networkId means that request was not recongnized by inspector, and
       // it will never receive Network.requestWillBeSent. Most likely, this is an internal request
@@ -207,7 +193,7 @@ export class CRNetworkManager {
       const request = this._requestIdToRequest.get(requestWillBeSentEvent.requestId);
       // If we connect late to the target, we could have missed the requestWillBeSent event.
       if (request) {
-        this._handleRequestRedirect(request, requestWillBeSentEvent.redirectResponse, requestWillBeSentEvent.timestamp);
+        this._handleRequestRedirect(request, requestWillBeSentEvent.redirectResponse, requestWillBeSentEvent.timestamp, requestWillBeSentEvent.redirectHasExtraInfo);
         redirectedFrom = request;
       }
     }
@@ -278,10 +264,17 @@ export class CRNetworkManager {
       redirectedFrom
     });
     this._requestIdToRequest.set(requestWillBeSentEvent.requestId, request);
+
+    if (requestPausedEvent && !requestPausedEvent.responseStatusCode && !requestPausedEvent.responseErrorReason) {
+      // We will not receive extra info when intercepting the request.
+      // Use the headers from the Fetch.requestPausedPayload and release the allHeaders()
+      // right away, so that client can call it from the route handler.
+      request.request.setRawRequestHeaders(headersObjectToArray(requestPausedEvent.request.headers, '\n'));
+    }
     (this._page?._frameManager || this._serviceWorker)!.requestStarted(request.request, route || undefined);
   }
 
-  _createResponse(request: InterceptableRequest, responsePayload: Protocol.Network.Response): network.Response {
+  _createResponse(request: InterceptableRequest, responsePayload: Protocol.Network.Response, hasExtraInfo: boolean): network.Response {
     const getResponseBody = async () => {
       const contentLengthHeader = Object.entries(responsePayload.headers).find(header => header[0].toLowerCase() === 'content-length');
       const expectedLength = contentLengthHeader ? +contentLengthHeader[1] : undefined;
@@ -291,7 +284,7 @@ export class CRNetworkManager {
         return Buffer.from(response.body, response.base64Encoded ? 'base64' : 'utf8');
 
       // For <link prefetch we are going to receive empty body with non-emtpy content-length expectation. Reach out for the actual content.
-      const resource = await this._client.send('Network.loadNetworkResource', { url: request.request.url(), frameId: request.request.frame()._id, options: { disableCache: false, includeCredentials: true } });
+      const resource = await this._client.send('Network.loadNetworkResource', { url: request.request.url(), frameId: this._serviceWorker ? undefined : request.request.frame()!._id, options: { disableCache: false, includeCredentials: true } });
       const chunks: Buffer[] = [];
       while (resource.resource.stream) {
         const chunk = await this._client.send('IO.read', { handle: resource.resource.stream });
@@ -344,12 +337,18 @@ export class CRNetworkManager {
       validFrom: responsePayload?.securityDetails?.validFrom,
       validTo: responsePayload?.securityDetails?.validTo,
     });
-    this._responseExtraInfoTracker.processResponse(request._requestId, response, request.wasFulfilled());
+    if (hasExtraInfo) {
+      this._responseExtraInfoTracker.processResponse(request._requestId, response);
+    } else {
+      // Use "provisional" headers as "raw" ones.
+      response.request().setRawRequestHeaders(null);
+      response.setRawResponseHeaders(null);
+    }
     return response;
   }
 
-  _handleRequestRedirect(request: InterceptableRequest, responsePayload: Protocol.Network.Response, timestamp: number) {
-    const response = this._createResponse(request, responsePayload);
+  _handleRequestRedirect(request: InterceptableRequest, responsePayload: Protocol.Network.Response, timestamp: number, hasExtraInfo: boolean) {
+    const response = this._createResponse(request, responsePayload, hasExtraInfo);
     response._requestFinished((timestamp - request._timestamp) * 1000);
     this._requestIdToRequest.delete(request._requestId);
     if (request._interceptionId)
@@ -363,13 +362,11 @@ export class CRNetworkManager {
   }
 
   _onResponseReceived(event: Protocol.Network.responseReceivedPayload) {
-    this._responseExtraInfoTracker.responseReceived(event);
-
     const request = this._requestIdToRequest.get(event.requestId);
     // FileUpload sends a response without a matching request.
     if (!request)
       return;
-    const response = this._createResponse(request, event.response);
+    const response = this._createResponse(request, event.response, event.hasExtraInfo);
     (this._page?._frameManager || this._serviceWorker)!.requestReceivedResponse(response);
   }
 
@@ -498,16 +495,11 @@ class InterceptableRequest {
       request = request._redirectedFrom;
     return request._route;
   }
-
-  wasFulfilled() {
-    return this._routeForRedirectChain()?._wasFulfilled || false;
-  }
 }
 
 class RouteImpl implements network.RouteDelegate {
   private readonly _client: CRSession;
   private _interceptionId: string;
-  _wasFulfilled = false;
 
   constructor(client: CRSession, interceptionId: string) {
     this._client = client;
@@ -527,7 +519,6 @@ class RouteImpl implements network.RouteDelegate {
   }
 
   async fulfill(response: types.NormalizedFulfillResponse) {
-    this._wasFulfilled = true;
     const body = response.isBase64 ? response.body : Buffer.from(response.body).toString('base64');
 
     const responseHeaders = splitSetCookieHeader(response.headers);
@@ -587,70 +578,39 @@ const errorReasons: { [reason: string]: Protocol.Network.ErrorReason } = {
 
 type RequestInfo = {
   requestId: string,
-  requestWillBeSentExtraInfo: Protocol.Network.requestWillBeSentExtraInfoPayload[],
-  responseReceivedExtraInfo: Protocol.Network.responseReceivedExtraInfoPayload[],
+  // Events are replaced with "undefined" to avoid updating the same headers twice.
+  requestWillBeSentExtraInfo: (Protocol.Network.requestWillBeSentExtraInfoPayload | undefined)[],
+  responseReceivedExtraInfo: (Protocol.Network.responseReceivedExtraInfoPayload | undefined)[],
+  // Note: we only put the responses that expect extra info in this list.
+  // Since the order of responses and extraInfo events is the same, each response
+  // will get a pair of matching request/response extraInfo events in this list.
   responses: network.Response[],
   loadingFinished?: Protocol.Network.loadingFinishedPayload,
   loadingFailed?: Protocol.Network.loadingFailedPayload,
-  sawResponseWithoutConnectionId: boolean
-  requestServedFromCache: boolean;
 };
 
 // This class aligns responses with response headers from extra info:
 //   - Network.requestWillBeSent, Network.responseReceived, Network.loadingFinished/loadingFailed are
 //     dispatched using one channel.
-//   - Network.requestWillBeSentExtraInfo and Network.responseReceivedExtraInfo are dispatches on
+//   - Network.requestWillBeSentExtraInfo and Network.responseReceivedExtraInfo are dispatched on
 //     another channel. Those channels are not associated, so events come in random order.
 //
 // This class will associate responses with the new headers. These extra info headers will become
 // available to client reliably upon requestfinished event only. It consumes CDP
 // signals on one end and processResponse(network.Response) signals on the other hands. It then makes
-// sure that responses have all the extra headers in place by the time request finises.
+// sure that responses have all the extra headers in place by the time request finishes.
 //
 // The shape of the instrumentation API is deliberately following the CDP, so that it
-// what clear what is called when and what this means to the tracker without extra
+// is clear what is called when and what this means to the tracker without extra
 // documentation.
 class ResponseExtraInfoTracker {
   private _requests = new Map<string, RequestInfo>();
-
-  requestWillBeSent(event: Protocol.Network.requestWillBeSentPayload) {
-    const info = this._requests.get(event.requestId);
-    if (info && event.redirectResponse)
-      this._innerResponseReceived(info, event.redirectResponse);
-    else
-      this._getOrCreateEntry(event.requestId);
-  }
 
   requestWillBeSentExtraInfo(event: Protocol.Network.requestWillBeSentExtraInfoPayload) {
     const info = this._getOrCreateEntry(event.requestId);
     info.requestWillBeSentExtraInfo.push(event);
     this._patchHeaders(info, info.requestWillBeSentExtraInfo.length - 1);
-  }
-
-  requestServedFromCache(event: Protocol.Network.requestServedFromCachePayload) {
-    const info = this._getOrCreateEntry(event.requestId);
-    info.requestServedFromCache = true;
-  }
-
-  responseReceived(event: Protocol.Network.responseReceivedPayload) {
-    const info = this._requests.get(event.requestId);
-    if (!info)
-      return;
-    this._innerResponseReceived(info, event.response);
-  }
-
-  requestPaused(request: network.Request, event: Protocol.Fetch.requestPausedPayload) {
-    // requestWillBeSentExtraInfo is not being called when interception
-    // is enabled. But interception is mutually exclusive with the redirects.
-    // So we can use the headers from the Fetch.requestPausedPayload immediately.
-    request.setRawRequestHeaders(headersObjectToArray(event.request.headers, '\n'));
-  }
-
-  private _innerResponseReceived(info: RequestInfo, response: Protocol.Network.Response) {
-    if (!response.connectionId) {
-      // Starting with this response we no longer can guarantee that response and extra info correspond to the same index.
-      info.sawResponseWithoutConnectionId = true;
-    }
+    this._checkFinished(info);
   }
 
   responseReceivedExtraInfo(event: Protocol.Network.responseReceivedExtraInfoPayload) {
@@ -660,19 +620,8 @@ class ResponseExtraInfoTracker {
     this._checkFinished(info);
   }
 
-  processResponse(requestId: string, response: network.Response, wasFulfilled: boolean) {
-    // We are not interested in ExtraInfo tracking for fulfilled requests, our Blink
-    // headers are the ones that contain fulfilled headers.
-    if (wasFulfilled) {
-      this._stopTracking(requestId);
-      return;
-    }
-
-    const info = this._requests.get(requestId);
-    if (!info || info.sawResponseWithoutConnectionId)
-      return;
-    if (!info.requestServedFromCache)
-      response.setWillReceiveExtraHeaders();
+  processResponse(requestId: string, response: network.Response) {
+    const info = this._getOrCreateEntry(requestId);
     info.responses.push(response);
     this._patchHeaders(info, info.responses.length - 1);
   }
@@ -701,8 +650,6 @@ class ResponseExtraInfoTracker {
         requestWillBeSentExtraInfo: [],
         responseReceivedExtraInfo: [],
         responses: [],
-        sawResponseWithoutConnectionId: false,
-        requestServedFromCache: false
       };
       this._requests.set(requestId, info);
     }
@@ -712,12 +659,15 @@ class ResponseExtraInfoTracker {
   private _patchHeaders(info: RequestInfo, index: number) {
     const response = info.responses[index];
     const requestExtraInfo = info.requestWillBeSentExtraInfo[index];
-    if (response && requestExtraInfo)
+    if (response && requestExtraInfo) {
       response.request().setRawRequestHeaders(headersObjectToArray(requestExtraInfo.headers, '\n'));
+      info.requestWillBeSentExtraInfo[index] = undefined;
+    }
     const responseExtraInfo = info.responseReceivedExtraInfo[index];
     if (response && responseExtraInfo) {
       response.setRawResponseHeaders(headersObjectToArray(responseExtraInfo.headers, '\n'));
       response.request().responseSize.responseHeadersSize = responseExtraInfo.headersText?.length || 0;
+      info.responseReceivedExtraInfo[index] = undefined;
     }
   }
 
@@ -727,7 +677,6 @@ class ResponseExtraInfoTracker {
 
     if (info.responses.length <= info.responseReceivedExtraInfo.length) {
       // We have extra info for each response.
-      // We could have more extra infos because we stopped collecting responses at some point.
       this._stopTracking(info.requestId);
       return;
     }

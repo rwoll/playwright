@@ -290,12 +290,14 @@ export class Route extends ChannelOwner<channels.RouteChannel> implements api.Ro
   }
 
   async abort(errorCode?: string) {
-    await this._abort(errorCode);
+    this._checkNotHandled();
+    await this._raceWithTargetClose(this._channel.abort({ errorCode }));
+    this._reportHandled(true);
   }
 
-  async _abort(errorCode?: string, redirectAbortedNavigationToUrl?: string) {
+  async _redirectNavigationRequest(url: string) {
     this._checkNotHandled();
-    await this._raceWithTargetClose(this._channel.abort({ errorCode, redirectAbortedNavigationToUrl }));
+    await this._raceWithTargetClose(this._channel.redirectNavigationRequest({ url }));
     this._reportHandled(true);
   }
 

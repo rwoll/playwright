@@ -40,6 +40,27 @@ it('should fall back', async ({ page, server }) => {
   expect(intercepted).toEqual([3, 2, 1]);
 });
 
+it('should fall back async', async ({ page, server }) => {
+  const intercepted = [];
+  await page.route('**/empty.html', async route => {
+    intercepted.push(1);
+    await new Promise(r => setTimeout(r, 100));
+    route.fallback();
+  });
+  await page.route('**/empty.html', async route => {
+    intercepted.push(2);
+    await new Promise(r => setTimeout(r, 100));
+    route.fallback();
+  });
+  await page.route('**/empty.html', async route => {
+    intercepted.push(3);
+    await new Promise(r => setTimeout(r, 100));
+    route.fallback();
+  });
+  await page.goto(server.EMPTY_PAGE);
+  expect(intercepted).toEqual([3, 2, 1]);
+});
+
 it('should not chain fulfill', async ({ page, server }) => {
   let failed = false;
   await page.route('**/empty.html', route => {
@@ -73,7 +94,10 @@ it('should not chain abort', async ({ page, server }) => {
   expect(failed).toBeFalsy();
 });
 
-it('should fall back after exception', async ({ page, server }) => {
+it('should fall back after exception', async ({ page, server, isAndroid, isElectron }) => {
+  it.fixme(isAndroid);
+  it.fixme(isElectron);
+
   await page.route('**/empty.html', route => {
     route.continue();
   });
@@ -169,11 +193,11 @@ it('should amend method', async ({ page, server }) => {
   await page.route('**/*', route => route.fallback({ method: 'POST' }));
 
   const [request] = await Promise.all([
-    server.waitForRequest('/sleep.zzz'),
+    page.waitForRequest('**/sleep.zzz'),
     page.evaluate(() => fetch('/sleep.zzz'))
   ]);
   expect(method).toBe('POST');
-  expect(request.method).toBe('POST');
+  expect(request.method()).toBe('POST');
   expect((await sRequest).method).toBe('POST');
 });
 
@@ -181,7 +205,7 @@ it('should override request url', async ({ page, server }) => {
   const request = server.waitForRequest('/global-var.html');
 
   let url: string;
-  await page.route('**/foo', route => {
+  await page.route('**/global-var.html', route => {
     url = route.request().url();
     route.continue();
   });
