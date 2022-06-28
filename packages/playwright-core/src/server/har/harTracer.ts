@@ -20,7 +20,7 @@ import { APIRequestContext } from '../fetch';
 import { helper } from '../helper';
 import * as network from '../network';
 import type { Worker } from '../page';
-import { Page } from '../page';
+import type { Page } from '../page';
 import type * as har from './har';
 import { assert, calculateSha1, monotonicTime } from '../../utils';
 import type { RegisteredListener } from '../../utils/eventsHelper';

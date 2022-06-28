@@ -22,7 +22,7 @@ import { Worker } from './worker';
 import type { Headers, RemoteAddr, SecurityDetails, WaitForEventOptions } from './types';
 import fs from 'fs';
 import { mime } from '../utilsBundle';
-import { assert, isString, headersObjectToArray, headersArrayToObject } from '../utils';
+import { assert, isString, headersObjectToArray } from '../utils';
 import { ManualPromise } from '../utils/manualPromise';
 import { Events } from './events';
 import type { Page } from './page';
