@@ -130,7 +130,7 @@ const test = baseTest.extend<BrowserTestTestFixtures, BrowserTestWorkerFixtures>
           return parseHar(harPath);
         },
       };
-    }
+    };
     await use(pageWithHar);
   }
 });
