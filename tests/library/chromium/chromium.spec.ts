@@ -107,7 +107,8 @@ test('should intercept service worker requests (main and within)', async ({ cont
   await expect(sw.evaluate(() => self['contentPromise'])).resolves.toBe('intercepted!');
 });
 
-test('should report failure (due to content-type) of main service worker request', async ({ server, page, context }) => {
+test('should report failure (due to content-type) of main service worker request', async ({ server, page, context, browserMajorVersion }) => {
+  test.skip(browserMajorVersion < 104, 'Requires http://crrev.com/1012503 or later.');
   server.setRoute('/serviceworkers/fetch/sw.js', (req, res) => {
     res.writeHead(200, 'OK', { 'Content-Type': 'text/html' });
     res.write(`console.log('hi from sw');`);
@@ -122,7 +123,8 @@ test('should report failure (due to content-type) of main service worker request
   await main.response();
 });
 
-test('should report failure (due to redirect) of main service worker request', async ({ server, page, context }) => {
+test('should report failure (due to redirect) of main service worker request', async ({ server, page, context, browserMajorVersion }) => {
+  test.skip(browserMajorVersion < 104, 'Requires http://crrev.com/1012503 or later.');
   server.setRedirect('/serviceworkers/empty/sw.js', '/dev/null');
   const [, main] = await Promise.all([
     server.waitForRequest('/serviceworkers/empty/sw.js'),
