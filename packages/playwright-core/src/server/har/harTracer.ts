@@ -65,9 +65,11 @@ export class HarTracer {
   private _started = false;
   private _entrySymbol: symbol;
   private _baseURL: string | undefined;
+  private _page: Page | null;
 
-  constructor(context: BrowserContext | APIRequestContext, delegate: HarTracerDelegate, options: HarTracerOptions) {
+  constructor(context: BrowserContext | APIRequestContext, page: Page | null, delegate: HarTracerDelegate, options: HarTracerOptions) {
     this._context = context;
+    this._page = page;
     this._delegate = delegate;
     this._options = options;
     if (options.slimMode) {
@@ -93,7 +95,7 @@ export class HarTracer {
     ];
     if (this._context instanceof BrowserContext) {
       this._eventListeners.push(
-          eventsHelper.addEventListener(this._context, BrowserContext.Events.Page, (page: Page) => this._ensurePageEntry(page)),
+          eventsHelper.addEventListener(this._context, BrowserContext.Events.Page, (page: Page) => this._createPageEntryIfNeeded(page)),
           eventsHelper.addEventListener(this._context, BrowserContext.Events.Request, (request: network.Request) => this._onRequest(request)),
           eventsHelper.addEventListener(this._context, BrowserContext.Events.RequestFinished, ({ request, response }) => this._onRequestFinished(request, response).catch(() => {})),
           eventsHelper.addEventListener(this._context, BrowserContext.Events.RequestFailed, request => this._onRequestFailed(request)),
@@ -109,8 +111,12 @@ export class HarTracer {
     return (request as any)[this._entrySymbol];
   }
 
-  private _ensurePageEntry(page: Page): har.Page | undefined {
+  private _createPageEntryIfNeeded(page?: Page): har.Page | undefined {
+    if (!page)
+      return;
     if (this._options.omitPages)
+      return;
+    if (this._page && page !== this._page)
       return;
     let pageEntry = this._pageEntries.get(page);
     if (!pageEntry) {
@@ -230,14 +236,15 @@ export class HarTracer {
   private _onRequest(request: network.Request) {
     if (!this._shouldIncludeEntryWithUrl(request.url()))
       return;
-    const frame = request.frame();
-    const page = frame?._page;
+    const page = request.frame()?._page;
+    if (this._page && page !== this._page)
+      return;
     const url = network.parsedURL(request.url());
     if (!url)
       return;
 
-    const pageEntry = page ? this._ensurePageEntry(page) : null;
-    const harEntry = createHarEntry(request.method(), url, frame?.guid, this._options);
+    const pageEntry = this._createPageEntryIfNeeded(page);
+    const harEntry = createHarEntry(request.method(), url, request.frame()?.guid, this._options);
     if (pageEntry)
       harEntry.pageref = pageEntry.id;
     harEntry.request.postData = this._postDataForRequest(request, this._options.content);
@@ -256,11 +263,10 @@ export class HarTracer {
   private async _onRequestFinished(request: network.Request, response: network.Response | null) {
     if (!response)
       return;
-    const frame = request.frame();
-    const page = frame?._page;
     const harEntry = this._entryForRequest(request);
     if (!harEntry)
       return;
+    const page = request.frame()?._page;
 
     const httpVersion = response.httpVersion();
     harEntry.request.httpVersion = httpVersion;
@@ -309,8 +315,7 @@ export class HarTracer {
       this._addBarrier(page || request.serviceWorker(), response.sizes().then(sizes => {
         harEntry.response.bodySize = sizes.responseBodySize;
         harEntry.response.headersSize = sizes.responseHeadersSize;
-        // Fallback for WebKit by calculating it manually
-        harEntry.response._transferSize = response.request().responseSize.transferSize || (sizes.responseHeadersSize + sizes.responseBodySize);
+        harEntry.response._transferSize = sizes.transferSize;
         harEntry.request.headersSize = sizes.requestHeadersSize;
         compressionCalculationBarrier?.setEncodedBodySize(sizes.responseBodySize);
       }));
@@ -358,11 +363,11 @@ export class HarTracer {
   }
 
   private _onResponse(response: network.Response) {
-    const page = response.frame()?._page;
-    const pageEntry = page ? this._ensurePageEntry(page) : null;
     const harEntry = this._entryForRequest(response.request());
     if (!harEntry)
       return;
+    const page = response.frame()?._page;
+    const pageEntry = this._createPageEntryIfNeeded(page);
     const request = response.request();
 
     harEntry.response = {

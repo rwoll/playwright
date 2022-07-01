@@ -3186,10 +3186,15 @@ export interface Page {
     notFound?: "abort"|"fallback";
 
     /**
+     * If specified, updates the given HAR with the actual network information instead of serving from file.
+     */
+    update?: boolean;
+
+    /**
      * A glob pattern, regular expression or predicate to match the request URL. Only requests with URL matching the pattern
      * will be served from the HAR file. If not specified, all requests are served from the HAR file.
      */
-    url?: string|RegExp|((url: URL) => boolean);
+    url?: string|RegExp;
   }): Promise<void>;
 
   /**
@@ -7138,10 +7143,15 @@ export interface BrowserContext {
     notFound?: "abort"|"fallback";
 
     /**
+     * If specified, updates the given HAR with the actual network information instead of serving from file.
+     */
+    update?: boolean;
+
+    /**
      * A glob pattern, regular expression or predicate to match the request URL. Only requests with URL matching the pattern
      * will be served from the HAR file. If not specified, all requests are served from the HAR file.
      */
-    url?: string|RegExp|((url: URL) => boolean);
+    url?: string|RegExp;
   }): Promise<void>;
 
   /**
@@ -10666,13 +10676,15 @@ export interface BrowserType<Unused = {}> {
 
       /**
        * Optional setting to control resource content management. If `omit` is specified, content is not persisted. If `attach`
-       * is specified, resources are persistet as separate files and all of these files are archived along with the HAR file.
-       * Defaults to `embed`, which stores content inline the HAR file as per HAR specification.
+       * is specified, resources are persistet as separate files or entries in the ZIP archive. If `embed` is specified, content
+       * is stored inline the HAR file as per HAR specification. Defaults to `attach` for `.zip` output files and to `embed` for
+       * all other file extensions.
        */
       content?: "omit"|"embed"|"attach";
 
       /**
-       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `attach` mode is used by default.
+       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `content: 'attach'` is used by
+       * default.
        */
       path: string;
 
@@ -11859,13 +11871,15 @@ export interface AndroidDevice {
 
       /**
        * Optional setting to control resource content management. If `omit` is specified, content is not persisted. If `attach`
-       * is specified, resources are persistet as separate files and all of these files are archived along with the HAR file.
-       * Defaults to `embed`, which stores content inline the HAR file as per HAR specification.
+       * is specified, resources are persistet as separate files or entries in the ZIP archive. If `embed` is specified, content
+       * is stored inline the HAR file as per HAR specification. Defaults to `attach` for `.zip` output files and to `embed` for
+       * all other file extensions.
        */
       content?: "omit"|"embed"|"attach";
 
       /**
-       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `attach` mode is used by default.
+       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `content: 'attach'` is used by
+       * default.
        */
       path: string;
 
@@ -13210,6 +13224,12 @@ export interface Browser extends EventEmitter {
    * In case this browser is connected to, clears all created contexts belonging to this browser and disconnects from the
    * browser server.
    *
+   * > NOTE: This is similar to force quitting the browser. Therefore, you should call
+   * [browserContext.close()](https://playwright.dev/docs/api/class-browsercontext#browser-context-close) on any
+   * [BrowserContext]'s you explicitly created earlier with
+   * [browser.newContext([options])](https://playwright.dev/docs/api/class-browser#browser-new-context) **before** calling
+   * [browser.close()](https://playwright.dev/docs/api/class-browser#browser-close).
+   *
    * The [Browser] object itself is considered to be disposed and cannot be used anymore.
    */
   close(): Promise<void>;
@@ -13243,6 +13263,12 @@ export interface Browser extends EventEmitter {
   /**
    * Creates a new browser context. It won't share cookies/cache with other browser contexts.
    *
+   * > NOTE: If directly using this method to create [BrowserContext]s, it is best practice to explicilty close the returned
+   * context via [browserContext.close()](https://playwright.dev/docs/api/class-browsercontext#browser-context-close) when
+   * your code is done with the [BrowserContext], and before calling
+   * [browser.close()](https://playwright.dev/docs/api/class-browser#browser-close). This will ensure the `context` is closed
+   * gracefully and any artifacts—like HARs and videos—are fully flushed and saved.
+   *
    * ```js
    * (async () => {
    *   const browser = await playwright.firefox.launch();  // Or 'chromium' or 'webkit'.
@@ -13251,6 +13277,10 @@ export interface Browser extends EventEmitter {
    *   // Create a new page in a pristine context.
    *   const page = await context.newPage();
    *   await page.goto('https://example.com');
+   *
+   *   // Gracefully close up everything
+   *   await context.close();
+   *   await browser.close();
    * })();
    * ```
    *
@@ -13435,13 +13465,15 @@ export interface Browser extends EventEmitter {
 
       /**
        * Optional setting to control resource content management. If `omit` is specified, content is not persisted. If `attach`
-       * is specified, resources are persistet as separate files and all of these files are archived along with the HAR file.
-       * Defaults to `embed`, which stores content inline the HAR file as per HAR specification.
+       * is specified, resources are persistet as separate files or entries in the ZIP archive. If `embed` is specified, content
+       * is stored inline the HAR file as per HAR specification. Defaults to `attach` for `.zip` output files and to `embed` for
+       * all other file extensions.
        */
       content?: "omit"|"embed"|"attach";
 
       /**
-       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `attach` mode is used by default.
+       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `content: 'attach'` is used by
+       * default.
        */
       path: string;
 
@@ -14227,13 +14259,15 @@ export interface Electron {
 
       /**
        * Optional setting to control resource content management. If `omit` is specified, content is not persisted. If `attach`
-       * is specified, resources are persistet as separate files and all of these files are archived along with the HAR file.
-       * Defaults to `embed`, which stores content inline the HAR file as per HAR specification.
+       * is specified, resources are persistet as separate files or entries in the ZIP archive. If `embed` is specified, content
+       * is stored inline the HAR file as per HAR specification. Defaults to `attach` for `.zip` output files and to `embed` for
+       * all other file extensions.
        */
       content?: "omit"|"embed"|"attach";
 
       /**
-       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `attach` mode is used by default.
+       * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `content: 'attach'` is used by
+       * default.
        */
       path: string;
 
@@ -15294,7 +15328,7 @@ export interface Route {
 
   /**
    * When several routes match the given pattern, they run in the order opposite to their registration. That way the last
-   * registered route can always override all the previos ones. In the example below, request will be handled by the
+   * registered route can always override all the previous ones. In the example below, request will be handled by the
    * bottom-most handler first, then it'll fall back to the previous one and in the end will be aborted by the first
    * registered route.
    *
@@ -16061,13 +16095,15 @@ export interface BrowserContextOptions {
 
     /**
      * Optional setting to control resource content management. If `omit` is specified, content is not persisted. If `attach`
-     * is specified, resources are persistet as separate files and all of these files are archived along with the HAR file.
-     * Defaults to `embed`, which stores content inline the HAR file as per HAR specification.
+     * is specified, resources are persistet as separate files or entries in the ZIP archive. If `embed` is specified, content
+     * is stored inline the HAR file as per HAR specification. Defaults to `attach` for `.zip` output files and to `embed` for
+     * all other file extensions.
      */
     content?: "omit"|"embed"|"attach";
 
     /**
-     * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `attach` mode is used by default.
+     * Path on the filesystem to write the HAR file to. If the file name ends with `.zip`, `content: 'attach'` is used by
+     * default.
      */
     path: string;
 
