@@ -193,7 +193,7 @@ export class HttpServer {
       'Content-Range': `bytes ${start}-${end}/${size}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': end - start + 1,
-      'Content-Type': mime.getType(path.extname(absoluteFilePath))!,
+      'Content-Type': mime.getType(path.extname(absoluteFilePath)) || 'application/octet-stream',
     });
 
     const readable = fs.createReadStream(absoluteFilePath, { start, end });
