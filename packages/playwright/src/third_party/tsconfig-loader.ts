@@ -38,6 +38,8 @@ interface TsConfig {
     paths?: { [key: string]: Array<string> };
     strict?: boolean;
     allowJs?: boolean;
+    jsx?: string;
+    jsxImportSource?: string;
   };
   references?: { path: string }[];
 }
@@ -50,6 +52,7 @@ export interface LoadedTsConfig {
   };
   absoluteBaseUrl?: string;
   allowJs?: boolean;
+  jsxImportSource?: string;
 }
 
 export function loadTsConfig(configPath: string): LoadedTsConfig[] {
@@ -104,6 +107,10 @@ function innerLoadTsConfig(
 
   if (parsedConfig.compilerOptions?.allowJs !== undefined)
     result.allowJs = parsedConfig.compilerOptions.allowJs;
+  if (parsedConfig.compilerOptions?.jsxImportSource !== undefined)
+    result.jsxImportSource = parsedConfig.compilerOptions.jsxImportSource;
+  else if (parsedConfig.compilerOptions?.jsx !== undefined && ['react-jsx', 'react-jsxdev'].includes(parsedConfig.compilerOptions.jsx) && result.jsxImportSource === undefined)
+    result.jsxImportSource = 'react';
   if (parsedConfig.compilerOptions?.paths !== undefined) {
     // We must store pathsBasePath from the config that defines "paths" and later resolve
     // based on this absolute path, when no "baseUrl" is specified. See tsc for reference:

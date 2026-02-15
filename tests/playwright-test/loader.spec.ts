@@ -579,6 +579,73 @@ test('should load a jsx/tsx files with fragments', async ({ runInlineTest }) => 
   expect(exitCode).toBe(0);
 });
 
+test('should respect jsxImportSource from tsconfig', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': JSON.stringify({
+      compilerOptions: {
+        jsx: 'react-jsx',
+        jsxImportSource: 'my-custom-jsx',
+      },
+    }),
+    'node_modules/my-custom-jsx/jsx-runtime.js': `
+      module.exports.jsx = function(type, props, key) {
+        return { __custom: true, type, props, key };
+      };
+      module.exports.jsxs = function(type, props, key) {
+        return { __custom: true, type, props, key };
+      };
+      module.exports.Fragment = Symbol.for('custom.fragment');
+    `,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const el = <div>hello</div>;
+      test('uses custom jsx runtime from tsconfig', () => {
+        expect(el).toEqual({
+          __custom: true,
+          type: 'div',
+          props: { children: 'hello' },
+          key: undefined,
+        });
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
+test('should respect jsx react-jsx in tsconfig and default jsxImportSource to react', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': JSON.stringify({
+      compilerOptions: {
+        jsx: 'react-jsx',
+      },
+    }),
+    'node_modules/react/jsx-runtime.js': `
+      module.exports.jsx = function(type, props, key) {
+        return { __react: true, type, props, key };
+      };
+      module.exports.jsxs = function(type, props, key) {
+        return { __react: true, type, props, key };
+      };
+      module.exports.Fragment = Symbol.for('react.fragment');
+    `,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const el = <span>world</span>;
+      test('uses react jsx runtime when jsx is react-jsx', () => {
+        expect(el).toEqual({
+          __react: true,
+          type: 'span',
+          props: { children: 'world' },
+          key: undefined,
+        });
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
 test('should remove type imports from ts', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'a.test.ts': `
