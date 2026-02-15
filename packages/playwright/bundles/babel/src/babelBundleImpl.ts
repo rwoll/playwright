@@ -31,6 +31,10 @@ export * as genMapping from '@jridgewell/gen-mapping';
 export const traverse = traverseFunction;
 
 function babelTransformOptions(isTypeScript: boolean, isModule: boolean, pluginsPrologue: [string, any?][], pluginsEpilogue: [string, any?][]): TransformOptions {
+  const isComponentTestingTransform = pluginsPrologue.some(([name]) => {
+    const pluginName = path.basename(name, path.extname(name));
+    return pluginName === 'tsxTransform' && name.includes(`${path.sep}playwright-ct-core${path.sep}`);
+  });
   const plugins = [
     [require('@babel/plugin-syntax-import-attributes'), { deprecatedAssertSyntax: true }],
   ];
@@ -73,7 +77,7 @@ function babelTransformOptions(isTypeScript: boolean, isModule: boolean, plugins
   plugins.push([require('@babel/plugin-transform-react-jsx'), {
     throwIfNamespace: false,
     runtime: 'automatic',
-    importSource: path.dirname(require.resolve('playwright')),
+    importSource: isComponentTestingTransform ? path.dirname(require.resolve('playwright')) : 'react',
   }]);
 
   if (!isModule) {
