@@ -104,6 +104,7 @@ function jsxImportSourceForFile(file: string): string | undefined {
     if (config.jsxImportSource)
       return config.jsxImportSource;
   }
+  return undefined;
 }
 
 function loadAndValidateTsconfigsForFolder(folder: string): ParsedTsConfigData[] {
