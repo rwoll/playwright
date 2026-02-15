@@ -579,6 +579,56 @@ test('should load a jsx/tsx files with fragments', async ({ runInlineTest }) => 
   expect(exitCode).toBe(0);
 });
 
+test('should respect jsxImportSource from tsconfig.json', async ({ runInlineTest }) => {
+  const { exitCode, passed, output } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <div>Hello</div>;
+      test('jsx uses react runtime when tsconfig specifies react-jsx', () => {
+        // With react-jsx, JSX should create real React elements, not Playwright's internal representation
+        // Real React elements have a $$typeof Symbol property
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('div');
+        // React elements have $$typeof set to a symbol
+        expect(typeof component['$$typeof']).toBe('symbol');
+        // Should NOT have Playwright's __pw_type property
+        expect(component['__pw_type']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
+test('should respect explicit jsxImportSource from tsconfig.json', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx",
+        "jsxImportSource": "react"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <span>Test</span>;
+      test('jsx uses explicit jsxImportSource', () => {
+        // With explicit jsxImportSource: "react", JSX should create real React elements
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('span');
+        expect(typeof component['$$typeof']).toBe('symbol');
+        expect(component['__pw_type']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
 test('should remove type imports from ts', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'a.test.ts': `
