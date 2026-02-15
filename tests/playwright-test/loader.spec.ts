@@ -654,6 +654,34 @@ test('should use playwright jsx-runtime when tsconfig has no jsx settings (backw
   expect(exitCode).toBe(0);
 });
 
+test('should work with renderToStaticMarkup when jsx: react-jsx is configured', async ({ runInlineTest }) => {
+  const { exitCode, passed, output } = await runInlineTest({
+    'package.json': `{ "dependencies": { "react": "*", "react-dom": "*" } }`,
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      import { renderToStaticMarkup } from 'react-dom/server';
+
+      test('renderToStaticMarkup works with JSX elements', () => {
+        const html = renderToStaticMarkup(<div>Hello <strong>world</strong></div>);
+        expect(html).toBe('<div>Hello <strong>world</strong></div>');
+      });
+
+      test('renderToStaticMarkup works with nested components', () => {
+        const Greeting = ({ name }: { name: string }) => <span>Hi {name}</span>;
+        const html = renderToStaticMarkup(<div><Greeting name="Test" /></div>);
+        expect(html).toBe('<div><span>Hi Test</span></div>');
+      });
+    `,
+  });
+  expect(passed).toBe(2);
+  expect(exitCode).toBe(0);
+});
+
 test('should remove type imports from ts', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'a.test.ts': `
