@@ -21,12 +21,12 @@ import { test, expect } from './playwright-test-fixtures';
 import { HttpServer } from '../../packages/playwright-core/lib/server/utils/httpServer';
 
 // Sends a raw HTTP GET and collects status, headers, and body.
-function rawGet(url: string, hdrs?: Record<string, string>) {
-  return new Promise<{ sc: number, rh: http.IncomingHttpHeaders, bd: string }>((resolve, reject) => {
-    http.get(url, { headers: hdrs }, r => {
+function rawGet(url: string, extraHeaders?: Record<string, string>) {
+  return new Promise<{ statusCode: number, headers: http.IncomingHttpHeaders, body: string }>((resolve, reject) => {
+    http.get(url, { headers: extraHeaders }, r => {
       const acc: string[] = [];
       r.on('data', (c: Buffer) => acc.push(c.toString()));
-      r.on('end', () => resolve({ sc: r.statusCode!, rh: r.headers, bd: acc.join('') }));
+      r.on('end', () => resolve({ statusCode: r.statusCode!, headers: r.headers, body: acc.join('') }));
     }).on('error', reject);
   });
 }
@@ -41,13 +41,13 @@ test('range request preserves Content-Type for .html files', async ({}, testInfo
   await srv.start({ host: '127.0.0.1' });
   try {
     const normal = await rawGet(`${srv.urlPrefix('precise')}/sample.html`);
-    expect(normal.sc).toBe(200);
-    expect(normal.rh['content-type']).toBe('text/html');
+    expect(normal.statusCode).toBe(200);
+    expect(normal.headers['content-type']).toBe('text/html');
 
     const ranged = await rawGet(`${srv.urlPrefix('precise')}/sample.html`, { 'Range': 'bytes=0-8' });
-    expect(ranged.sc).toBe(206);
-    expect(ranged.rh['content-type']).toBe('text/html');
-    expect(ranged.bd).toBe('<section>');
+    expect(ranged.statusCode).toBe(206);
+    expect(ranged.headers['content-type']).toBe('text/html');
+    expect(ranged.body).toBe('<section>');
   } finally {
     await srv.stop();
   }
@@ -63,13 +63,13 @@ test('range request falls back to octet-stream for unrecognized extensions', asy
   await srv.start({ host: '127.0.0.1' });
   try {
     const normal = await rawGet(`${srv.urlPrefix('precise')}/artifact.xyzfoo`);
-    expect(normal.sc).toBe(200);
-    expect(normal.rh['content-type']).toBe('application/octet-stream');
+    expect(normal.statusCode).toBe(200);
+    expect(normal.headers['content-type']).toBe('application/octet-stream');
 
     const ranged = await rawGet(`${srv.urlPrefix('precise')}/artifact.xyzfoo`, { 'Range': 'bytes=0-6' });
-    expect(ranged.sc).toBe(206);
-    expect(ranged.rh['content-type']).toBe('application/octet-stream');
-    expect(ranged.bd).toBe('mystery');
+    expect(ranged.statusCode).toBe(206);
+    expect(ranged.headers['content-type']).toBe('application/octet-stream');
+    expect(ranged.body).toBe('mystery');
   } finally {
     await srv.stop();
   }
