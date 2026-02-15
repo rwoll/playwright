@@ -629,6 +629,31 @@ test('should respect explicit jsxImportSource from tsconfig.json', async ({ runI
   expect(exitCode).toBe(0);
 });
 
+test('should use playwright jsx-runtime when tsconfig has no jsx settings (backward compatibility)', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "strict": true
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <div>Fallback</div>;
+      test('jsx uses playwright runtime when no jsx config is specified', () => {
+        // Without jsx config, Playwright's internal jsx-runtime should be used
+        // This creates objects with __pw_type property (for Component Testing)
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('div');
+        expect(component['__pw_type']).toBe('jsx');
+        // Should NOT have React's $$typeof property
+        expect(component['$$typeof']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
 test('should remove type imports from ts', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'a.test.ts': `
