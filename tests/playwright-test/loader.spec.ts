@@ -516,28 +516,14 @@ test('should load a jsx/tsx files in ESM mode', async ({ runInlineTest }) => {
   expect(exitCode).toBe(0);
 });
 
-test('should load jsx with top-level component', async ({ runInlineTest }) => {
+test('should load jsx with react runtime by default', async ({ runInlineTest }) => {
   const { exitCode, passed } = await runInlineTest({
     'a.spec.tsx': `
       import { test, expect } from '@playwright/test';
+      import { renderToStaticMarkup } from 'react-dom/server';
       const component = <div>Hello <span>world</span></div>;
       test('succeeds', () => {
-        expect(component).toEqual({
-          __pw_type: 'jsx',
-          type: 'div',
-          props: {
-            children: [
-              'Hello ',
-              {
-                __pw_type: 'jsx',
-                type: 'span',
-                props: {
-                  children: 'world'
-                },
-              }
-            ]
-          },
-        });
+        expect(renderToStaticMarkup(component)).toBe('<div>Hello <span>world</span></div>');
       });
     `,
   });
