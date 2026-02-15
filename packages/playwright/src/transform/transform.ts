@@ -40,6 +40,7 @@ type ParsedTsConfigData = {
   pathsBase?: string;
   paths: { key: string, values: string[] }[];
   allowJs: boolean;
+  jsxImportSource?: string;
 };
 const cachedTSConfigs = new Map<string, ParsedTsConfigData[]>();
 
@@ -84,7 +85,8 @@ function validateTsConfig(tsconfig: LoadedTsConfig): ParsedTsConfigData {
   return {
     allowJs: !!tsconfig.allowJs,
     pathsBase,
-    paths: Object.entries(tsconfig.paths?.mapping || {}).map(([key, values]) => ({ key, values })).concat(pathsFallback)
+    paths: Object.entries(tsconfig.paths?.mapping || {}).map(([key, values]) => ({ key, values })).concat(pathsFallback),
+    jsxImportSource: tsconfig.jsxImportSource,
   };
 }
 
@@ -94,6 +96,15 @@ function loadAndValidateTsconfigsForFile(file: string): ParsedTsConfigData[] {
   if (_singleTSConfig)
     return _singleTSConfig;
   return loadAndValidateTsconfigsForFolder(path.dirname(file));
+}
+
+function jsxImportSourceForFile(file: string): string | undefined {
+  const configs = loadAndValidateTsconfigsForFile(file);
+  for (const config of configs) {
+    if (config.jsxImportSource)
+      return config.jsxImportSource;
+  }
+  return undefined;
 }
 
 function loadAndValidateTsconfigsForFolder(folder: string): ParsedTsConfigData[] {
@@ -236,7 +247,8 @@ export function transformHook(originalCode: string, filename: string, moduleUrl?
     process.env.PW_TEST_SOURCE_TRANSFORM_SCOPE.split(pathSeparator).some(f => filename.startsWith(f));
   const pluginsPrologue = _transformConfig.babelPlugins;
   const pluginsEpilogue = hasPreprocessor ? [[process.env.PW_TEST_SOURCE_TRANSFORM!]] as BabelPlugin[] : [];
-  const hash = calculateHash(originalCode, filename, !!moduleUrl, pluginsPrologue, pluginsEpilogue);
+  const jsxImportSource = jsxImportSourceForFile(filename);
+  const hash = calculateHash(originalCode, filename, !!moduleUrl, pluginsPrologue, pluginsEpilogue, jsxImportSource);
   const { cachedCode, addToCache, serializedCache } = getFromCompilationCache(filename, hash, moduleUrl);
   if (cachedCode !== undefined)
     return { code: cachedCode, serializedCache };
@@ -247,7 +259,7 @@ export function transformHook(originalCode: string, filename: string, moduleUrl?
 
   const { babelTransform }: { babelTransform: BabelTransformFunction } = require('./babelBundle');
   transformData = new Map<string, any>();
-  const babelResult = babelTransform(originalCode, filename, !!moduleUrl, pluginsPrologue, pluginsEpilogue, inputSourceMap);
+  const babelResult = babelTransform(originalCode, filename, !!moduleUrl, pluginsPrologue, pluginsEpilogue, inputSourceMap, jsxImportSource);
   if (!babelResult?.code)
     return { code: originalCode, serializedCache };
   const { code, map } = babelResult;
@@ -255,7 +267,7 @@ export function transformHook(originalCode: string, filename: string, moduleUrl?
   return { code, serializedCache: added.serializedCache };
 }
 
-function calculateHash(content: string, filePath: string, isModule: boolean, pluginsPrologue: BabelPlugin[], pluginsEpilogue: BabelPlugin[]): string {
+function calculateHash(content: string, filePath: string, isModule: boolean, pluginsPrologue: BabelPlugin[], pluginsEpilogue: BabelPlugin[], jsxImportSource?: string): string {
   const hash = crypto.createHash('sha1')
       .update(isModule ? 'esm' : 'no_esm')
       .update(content)
@@ -263,6 +275,7 @@ function calculateHash(content: string, filePath: string, isModule: boolean, plu
       .update(version)
       .update(pluginsPrologue.map(p => p[0]).join(','))
       .update(pluginsEpilogue.map(p => p[0]).join(','))
+      .update(jsxImportSource ?? '')
       .digest('hex');
   return hash;
 }
