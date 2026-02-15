@@ -579,6 +579,109 @@ test('should load a jsx/tsx files with fragments', async ({ runInlineTest }) => 
   expect(exitCode).toBe(0);
 });
 
+test('should respect jsxImportSource from tsconfig.json', async ({ runInlineTest }) => {
+  const { exitCode, passed, output } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <div>Hello</div>;
+      test('jsx uses react runtime when tsconfig specifies react-jsx', () => {
+        // With react-jsx, JSX should create real React elements, not Playwright's internal representation
+        // Real React elements have a $$typeof Symbol property
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('div');
+        // React elements have $$typeof set to a symbol
+        expect(typeof component['$$typeof']).toBe('symbol');
+        // Should NOT have Playwright's __pw_type property
+        expect(component['__pw_type']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
+test('should respect explicit jsxImportSource from tsconfig.json', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx",
+        "jsxImportSource": "react"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <span>Test</span>;
+      test('jsx uses explicit jsxImportSource', () => {
+        // With explicit jsxImportSource: "react", JSX should create real React elements
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('span');
+        expect(typeof component['$$typeof']).toBe('symbol');
+        expect(component['__pw_type']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
+test('should use playwright jsx-runtime when tsconfig has no jsx settings (backward compatibility)', async ({ runInlineTest }) => {
+  const { exitCode, passed } = await runInlineTest({
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "strict": true
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      const component = <div>Fallback</div>;
+      test('jsx uses playwright runtime when no jsx config is specified', () => {
+        // Without jsx config, Playwright's internal jsx-runtime should be used
+        // This creates objects with __pw_type property (for Component Testing)
+        expect(typeof component).toBe('object');
+        expect(component.type).toBe('div');
+        expect(component['__pw_type']).toBe('jsx');
+        // Should NOT have React's $$typeof property
+        expect(component['$$typeof']).toBeUndefined();
+      });
+    `,
+  });
+  expect(passed).toBe(1);
+  expect(exitCode).toBe(0);
+});
+
+test('should work with renderToStaticMarkup when jsx: react-jsx is configured', async ({ runInlineTest }) => {
+  const { exitCode, passed, output } = await runInlineTest({
+    'package.json': `{ "dependencies": { "react": "*", "react-dom": "*" } }`,
+    'tsconfig.json': `{
+      "compilerOptions": {
+        "jsx": "react-jsx"
+      }
+    }`,
+    'a.spec.tsx': `
+      import { test, expect } from '@playwright/test';
+      import { renderToStaticMarkup } from 'react-dom/server';
+
+      test('renderToStaticMarkup works with JSX elements', () => {
+        const html = renderToStaticMarkup(<div>Hello <strong>world</strong></div>);
+        expect(html).toBe('<div>Hello <strong>world</strong></div>');
+      });
+
+      test('renderToStaticMarkup works with nested components', () => {
+        const Greeting = ({ name }: { name: string }) => <span>Hi {name}</span>;
+        const html = renderToStaticMarkup(<div><Greeting name="Test" /></div>);
+        expect(html).toBe('<div><span>Hi Test</span></div>');
+      });
+    `,
+  });
+  expect(passed).toBe(2);
+  expect(exitCode).toBe(0);
+});
+
 test('should remove type imports from ts', async ({ runInlineTest }) => {
   const result = await runInlineTest({
     'a.test.ts': `
